@@ -22,7 +22,12 @@ import sys as _sys
 import time
 from typing import Any
 
-__all__ = ["ZMLogAdapter", "setup_zm_logging"]
+__all__ = [
+    "ZMLogAdapter",
+    "setup_zm_logging",
+    "get_logpath",
+    "get_log_file",
+]
 
 # ZM level mapping: DBG=1, INF=0, WAR=-1, ERR=-2, FAT=-3
 _ZM_LEVELS: dict[str, int] = {"DBG": 1, "INF": 0, "WAR": -1, "ERR": -2, "FAT": -3}
@@ -648,3 +653,38 @@ def setup_zm_logging(
         pass
 
     return adapter
+
+
+def get_logpath(conf_path: str = "/etc/zm") -> str:
+    """Return the resolved ZM log directory without initializing logging.
+
+    Precedence (matches setup_zm_logging):
+        PYZM_LOGPATH env var
+        > ZM_PATH_LOGS in /etc/zm/zm.conf and conf.d/*.conf
+        > /var/log/zm (default)
+
+    Safe to call from any process; does not touch the DB, open handlers,
+    or register signal handlers.
+    """
+    env = os.environ.get("PYZM_LOGPATH")
+    if env:
+        return env
+    conf_val = _read_zm_conf_full(conf_path).get("logpath")
+    if conf_val:
+        return conf_val
+    return "/var/log/zm"
+
+
+def get_log_file() -> str | None:
+    """Return the file path pyzm is currently writing logs to, or None.
+
+    Returns None when file logging is disabled (``ZM_LOG_LEVEL_FILE``
+    set to off) or when :func:`setup_zm_logging` has not been called.
+    Reflects live state -- honors ``ZM_LOG_DEBUG_FILE`` overrides and
+    any post-SIGHUP rotation, since it reads ``baseFilename`` off the
+    actual ``WatchedFileHandler``.
+    """
+    for h in logging.getLogger("pyzm").handlers:
+        if isinstance(h, logging.handlers.WatchedFileHandler):
+            return h.baseFilename
+    return None
