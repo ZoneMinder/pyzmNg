@@ -467,11 +467,6 @@ def setup_zm_logging(
         "dump_console": os.environ.get("PYZM_DUMPCONSOLE"),
     }
 
-    # Apply defaults for None values
-    for key, val in defaults.items():
-        if config.get(key) is None and val is not None:
-            config[key] = val
-
     # Round 1 overrides (before DB read)
     for key in override:
         if override[key]:
