@@ -671,6 +671,73 @@ class TestSetupZmLogging:
     @patch("pyzm.log._read_zm_db_log_config", return_value={})
     @patch("pyzm.log._read_zm_conf_full", return_value={
         "dbuser": "u", "dbpassword": "p", "dbhost": "h",
+        "dbname": "zm", "webuser": "zmuser", "webgroup": "zmgroup",
+        "logpath": "/var/log/zoneminder",
+    })
+    @patch("pyzm.log._signal.signal")
+    def test_conf_logpath_honored(self, mock_sig, mock_conf, mock_db, monkeypatch):
+        """ZM_PATH_LOGS from zm.conf must flow through when no env/override is set.
+
+        Regression test for #45 -- the first defaults loop used to populate
+        config['logpath'] with '/var/log/zm' before the conf was read, causing
+        the conf value to be silently dropped.
+        """
+        monkeypatch.delenv("PYZM_LOGPATH", raising=False)
+        monkeypatch.delenv("PYZM_WEBUSER", raising=False)
+        monkeypatch.delenv("PYZM_WEBGROUP", raising=False)
+        adapter = setup_zm_logging(name="test_conf_logpath", override={
+            "log_level_file": _ZM_OFF,
+            "log_level_db": _ZM_OFF,
+            "log_level_syslog": _ZM_OFF,
+        })
+        assert adapter._config["logpath"] == "/var/log/zoneminder"
+        assert adapter._config["webuser"] == "zmuser"
+        assert adapter._config["webgroup"] == "zmgroup"
+        adapter.close()
+
+    @patch("pyzm.log._read_zm_db_log_config", return_value={})
+    @patch("pyzm.log._read_zm_conf_full", return_value={
+        "dbuser": "u", "dbpassword": "p", "dbhost": "h",
+        "dbname": "zm", "webuser": "zmuser", "webgroup": "zmgroup",
+        "logpath": "/var/log/zoneminder",
+    })
+    @patch("pyzm.log._signal.signal")
+    def test_env_overrides_conf_logpath(self, mock_sig, mock_conf, mock_db, monkeypatch):
+        """PYZM_LOGPATH env var still wins over the conf-file value."""
+        monkeypatch.setenv("PYZM_LOGPATH", "/env/logs")
+        adapter = setup_zm_logging(name="test_env_logpath", override={
+            "log_level_file": _ZM_OFF,
+            "log_level_db": _ZM_OFF,
+            "log_level_syslog": _ZM_OFF,
+        })
+        assert adapter._config["logpath"] == "/env/logs"
+        adapter.close()
+
+    @patch("pyzm.log._read_zm_db_log_config", return_value={})
+    @patch("pyzm.log._read_zm_conf_full", return_value={
+        "dbuser": "u", "dbpassword": "p", "dbhost": "h",
+        "dbname": "zm", "webuser": None, "webgroup": None,
+        "logpath": None,
+    })
+    @patch("pyzm.log._signal.signal")
+    def test_final_defaults_when_no_source(self, mock_sig, mock_conf, mock_db, monkeypatch):
+        """Hard-coded defaults apply only when env, conf, and override are all empty."""
+        monkeypatch.delenv("PYZM_LOGPATH", raising=False)
+        monkeypatch.delenv("PYZM_WEBUSER", raising=False)
+        monkeypatch.delenv("PYZM_WEBGROUP", raising=False)
+        adapter = setup_zm_logging(name="test_default_logpath", override={
+            "log_level_file": _ZM_OFF,
+            "log_level_db": _ZM_OFF,
+            "log_level_syslog": _ZM_OFF,
+        })
+        assert adapter._config["logpath"] == "/var/log/zm"
+        assert adapter._config["webuser"] == "www-data"
+        assert adapter._config["webgroup"] == "www-data"
+        adapter.close()
+
+    @patch("pyzm.log._read_zm_db_log_config", return_value={})
+    @patch("pyzm.log._read_zm_conf_full", return_value={
+        "dbuser": "u", "dbpassword": "p", "dbhost": "h",
         "dbname": "zm", "webuser": "www", "webgroup": "www",
         "logpath": "/tmp",
     })
