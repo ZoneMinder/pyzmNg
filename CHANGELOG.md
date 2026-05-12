@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.3.5] - 2026-05-12
+
+### Bug Fixes
+
+- honor ZM_PATH_LOGS from zm.conf in setup_zm_logging ([ad174b7](https://github.com/pliablepixels/pyzm/commit/ad174b7cdb93dbf000e790ea9b717dadb89f2c29))
+
+### Documentation
+
+- rename zmNinjaNG to zmNinjaNg for consistent casing ([832db72](https://github.com/pliablepixels/pyzm/commit/832db7248d002c4cd7772159a9fc8fad2f03e8ac))
+
+### Features
+
+- add get_logpath() and get_log_file() public helpers ([29adfcf](https://github.com/pliablepixels/pyzm/commit/29adfcf2d9f9a8d81a42e86e9a0c92977f44982d))
+
+### Testing
+
+- scope sys.modules mocks to avoid polluting later tests ([d0d6a24](https://github.com/pliablepixels/pyzm/commit/d0d6a248cbbac8fd4c8ef949e391bf7258da2e4b))
+
 ## [2.3.4] - 2026-04-08
 
 ### Bug Fixes
@@ -11,6 +29,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- update CHANGELOG for v2.3.4 ([63e7bfb](https://github.com/pliablepixels/pyzm/commit/63e7bfbd5f5cd024f98ec1a86013df1c76d02294))
 - rename Event Server v7+ to EventServerNg and zmes to zmesNg ([8c0910a](https://github.com/pliablepixels/pyzm/commit/8c0910a11ced92876084da8d1235c757e8560945))
 - removed the tips - not useful ([4674c31](https://github.com/pliablepixels/pyzm/commit/4674c316d3b2a58cbd6bdbeae42a2c9315596c4a))
 
