@@ -14,6 +14,7 @@ from pyzm.log import (
     _read_zm_conf_full, _zm_config_to_handler_level, _ZM_OFF,
     _ZMDBHandler, _ZMFileFormatter, _ZMSyslogFormatter,
     ZMLogAdapter, setup_zm_logging,
+    get_logpath, get_log_file,
 )
 
 
@@ -1000,3 +1001,122 @@ class TestFileFormatAllLevels:
         for lvl in range(1, 10):
             result = self._format(logging.DEBUG, zm_debug_level=lvl)
             assert f"].DB{lvl} [" in result
+
+
+# ===================================================================
+# TestGetLogpath
+# ===================================================================
+
+class TestGetLogpath:
+    """Tests for the public get_logpath() helper (issue #46)."""
+
+    def test_env_var_wins(self, tmp_path, monkeypatch):
+        """PYZM_LOGPATH beats conf-file value."""
+        (tmp_path / "zm.conf").write_text("ZM_PATH_LOGS=/conf/path\n")
+        monkeypatch.setenv("PYZM_LOGPATH", "/env/path")
+        assert get_logpath(str(tmp_path)) == "/env/path"
+
+    def test_conf_file_wins_over_default(self, tmp_path, monkeypatch):
+        """ZM_PATH_LOGS in zm.conf is used when env is unset."""
+        (tmp_path / "zm.conf").write_text("ZM_PATH_LOGS=/conf/path\n")
+        monkeypatch.delenv("PYZM_LOGPATH", raising=False)
+        assert get_logpath(str(tmp_path)) == "/conf/path"
+
+    def test_default_when_nothing_set(self, tmp_path, monkeypatch):
+        """Falls back to /var/log/zm when env and conf are silent."""
+        (tmp_path / "zm.conf").write_text("")
+        monkeypatch.delenv("PYZM_LOGPATH", raising=False)
+        assert get_logpath(str(tmp_path)) == "/var/log/zm"
+
+    def test_does_not_require_setup(self, tmp_path, monkeypatch):
+        """get_logpath() works standalone -- no setup_zm_logging needed."""
+        (tmp_path / "zm.conf").write_text("ZM_PATH_LOGS=/standalone/path\n")
+        monkeypatch.delenv("PYZM_LOGPATH", raising=False)
+        # Wipe any pyzm logger handlers to prove we don't peek at them
+        logging.getLogger("pyzm").handlers.clear()
+        assert get_logpath(str(tmp_path)) == "/standalone/path"
+
+
+# ===================================================================
+# TestGetLogFile
+# ===================================================================
+
+class TestGetLogFile:
+    """Tests for the public get_log_file() helper (issue #46)."""
+
+    def setup_method(self):
+        # Each test starts from a clean pyzm logger
+        logging.getLogger("pyzm").handlers.clear()
+
+    def teardown_method(self):
+        logging.getLogger("pyzm").handlers.clear()
+
+    def test_returns_none_when_no_handler(self):
+        """Before setup_zm_logging -- no file handler attached -- returns None."""
+        assert get_log_file() is None
+
+    @patch("pyzm.log._read_zm_db_log_config", return_value={})
+    @patch("pyzm.log._read_zm_conf_full", return_value={
+        "dbuser": "u", "dbpassword": "p", "dbhost": "h",
+        "dbname": "zm", "webuser": "www", "webgroup": "www",
+        "logpath": None,  # forces final-default fallback
+    })
+    @patch("pyzm.log._signal.signal")
+    def test_returns_path_after_setup(self, mock_sig, mock_conf, mock_db, tmp_path):
+        """Returns the WatchedFileHandler's open file path after setup."""
+        adapter = setup_zm_logging(name="zmesdetect_m1", override={
+            "logpath": str(tmp_path),
+            "log_level_file": 0,
+            "log_level_db": _ZM_OFF,
+            "log_level_syslog": _ZM_OFF,
+        })
+        try:
+            assert get_log_file() == str(tmp_path / "zmesdetect_m1.log")
+        finally:
+            adapter.close()
+
+    @patch("pyzm.log._read_zm_db_log_config", return_value={})
+    @patch("pyzm.log._read_zm_conf_full", return_value={
+        "dbuser": "u", "dbpassword": "p", "dbhost": "h",
+        "dbname": "zm", "webuser": "www", "webgroup": "www",
+        "logpath": "/tmp",
+    })
+    @patch("pyzm.log._signal.signal")
+    def test_returns_none_when_file_logging_disabled(
+        self, mock_sig, mock_conf, mock_db,
+    ):
+        """File handler isn't attached when log_level_file == _ZM_OFF."""
+        adapter = setup_zm_logging(name="zm_nofile", override={
+            "log_level_file": _ZM_OFF,
+            "log_level_db": _ZM_OFF,
+            "log_level_syslog": _ZM_OFF,
+        })
+        try:
+            assert get_log_file() is None
+        finally:
+            adapter.close()
+
+    @patch("pyzm.log._read_zm_db_log_config", return_value={})
+    @patch("pyzm.log._read_zm_conf_full", return_value={
+        "dbuser": "u", "dbpassword": "p", "dbhost": "h",
+        "dbname": "zm", "webuser": "www", "webgroup": "www",
+        "logpath": "/should/be/ignored",
+    })
+    @patch("pyzm.log._signal.signal")
+    def test_reflects_debug_file_override(
+        self, mock_sig, mock_conf, mock_db, tmp_path,
+    ):
+        """ZM_LOG_DEBUG_FILE override is visible in get_log_file()."""
+        debug_file = tmp_path / "custom-debug.log"
+        adapter = setup_zm_logging(name="zm_dbg", override={
+            "log_debug": 1,
+            "log_level_debug": 5,
+            "log_debug_file": str(debug_file),
+            "log_level_file": 0,
+            "log_level_db": _ZM_OFF,
+            "log_level_syslog": _ZM_OFF,
+        })
+        try:
+            assert get_log_file() == str(debug_file)
+        finally:
+            adapter.close()
