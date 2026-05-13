@@ -67,13 +67,53 @@ Other ``ZMLogAdapter`` methods:
 How it works
 ~~~~~~~~~~~~~
 
-``setup_zm_logging()`` reads configuration from four sources (in order,
-later sources override earlier ones):
+``setup_zm_logging()`` resolves its configuration from up to four sources
+and then attaches handlers to the ``"pyzm"`` stdlib logger.  The precedence
+differs slightly by field:
 
-1. Environment variables (see table below)
-2. ZoneMinder config files (``/etc/zm/zm.conf`` and ``conf.d/*.conf``)
-3. ZM database ``Config`` table (``ZM_LOG_LEVEL_FILE``, ``ZM_LOG_DEBUG``, etc.)
-4. The ``override`` dict you pass directly
+* **Paths and DB credentials** (``logpath``, ``dbuser``, ``dbpassword``,
+  ``dbhost``, ``dbname``, ``webuser``, ``webgroup``):
+
+  ``override`` > environment variable > ``zm.conf`` / ``conf.d/*.conf`` > built-in default
+
+* **Log levels and debug flags** (``log_level_file``, ``log_level_db``,
+  ``log_level_syslog``, ``log_debug``, ``log_level_debug``,
+  ``log_debug_target``, ``log_debug_file``, ``server_id``):
+
+  ``override`` > ZM database ``Config`` table > environment variable > built-in default
+
+The ``override`` dict is applied twice -- before and after the DB read --
+so values you pass there always win.
+
+Where the log file is written
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Once the config is resolved, the file path is computed as::
+
+   <logpath>/<name>.log
+
+where ``<logpath>`` is the resolved directory (see precedence above) and
+``<name>`` is the ``name=`` you passed to ``setup_zm_logging()`` with any
+extension stripped.  For example, ``setup_zm_logging(name="zmesdetect_m1")``
+with ``logpath=/var/log/zm`` writes to ``/var/log/zm/zmesdetect_m1.log``.
+
+Special case: when ``log_debug`` is on **and** ``ZM_LOG_DEBUG_FILE``
+(``log_debug_file``) is set to a non-empty path, that exact path is used
+instead -- useful for redirecting a single component's debug output to a
+dedicated file.
+
+**Gate:** the file is only opened when ``log_level_file > 0``.  With the
+default config (level ``0`` = off), no file is written even if
+``logpath`` is set.  This level is normally pulled from
+``ZM_LOG_LEVEL_FILE`` in the ZM database, so a process that cannot reach
+the database silently falls back to "off" and produces no file.
+
+.. note::
+
+   If the resolved ``logpath`` directory does not exist,
+   ``setup_zm_logging`` silently skips attaching the file handler (the
+   underlying ``OSError`` from opening the file is caught).  Create the
+   directory before testing custom paths.
 
 Environment variables
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -163,3 +203,56 @@ ZM config (``ZM_LOG_LEVEL_FILE``, ``ZM_LOG_LEVEL_DATABASE``,
 Signal handlers are registered for log management:
 ``SIGHUP`` reopens the log file (for log rotation), ``SIGUSR1``/``SIGUSR2``
 increase/decrease verbosity at runtime.
+
+Inspecting and testing the log path
+------------------------------------
+
+Two helpers let you check paths without standing up the full logger:
+
+.. code-block:: python
+
+   from pyzm.log import get_logpath, get_log_file
+
+   # The log *directory* (pure config lookup -- no DB, no handlers).
+   # Precedence: PYZM_LOGPATH > ZM_PATH_LOGS in zm.conf > /var/log/zm.
+   get_logpath()                       # e.g. "/var/log/zm"
+
+   # The *active* log file path (only meaningful after setup_zm_logging
+   # has run AND file logging is enabled).  Returns None otherwise.
+   get_log_file()                      # e.g. "/var/log/zm/myapp.log"
+
+Three ways to test or change the log path:
+
+**1. Override at the call site** -- most explicit, no system changes:
+
+.. code-block:: python
+
+   import os
+   from pyzm.log import setup_zm_logging, get_log_file
+
+   os.makedirs("/tmp/zmtest", exist_ok=True)
+   setup_zm_logging(name="probe", override={
+       "logpath": "/tmp/zmtest",
+       "log_level_file": 1,            # required -- file logging is off by default
+   })
+   print(get_log_file())               # /tmp/zmtest/probe.log
+
+**2. Environment variables** -- no code change, scoped to the shell:
+
+.. code-block:: bash
+
+   mkdir -p /tmp/zmtest
+   PYZM_LOGPATH=/tmp/zmtest PYZM_FILELOGLEVEL=1 \
+       python -c "from pyzm.log import setup_zm_logging, get_log_file; \
+                  setup_zm_logging(name='probe'); print(get_log_file())"
+   # /tmp/zmtest/probe.log
+
+**3. System config** -- persistent, affects all ZM processes:
+
+Set ``ZM_PATH_LOGS`` in ``/etc/zm/conf.d/01-system-paths.conf`` (or
+``zm.conf``).  This is what ZoneMinder itself reads.  Verify what pyzm
+sees with:
+
+.. code-block:: bash
+
+   python -c "from pyzm.log import get_logpath; print(get_logpath())"
