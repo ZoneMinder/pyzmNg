@@ -604,7 +604,7 @@ class TestStreamConfig:
         assert sc.sleep_between_attempts == 3
         assert sc.save_frames is False
         assert sc.save_frames_dir == "/tmp"
-        assert sc.convert_snapshot_to_fid is True
+        assert sc.convert_snapshot_to_fid is False
 
     def test_all_fields_override(self):
         sc = StreamConfig(

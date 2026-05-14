@@ -457,7 +457,11 @@ Controls frame extraction from ZM events:
      - Delete downloaded frames after detection completes
    * - ``convert_snapshot_to_fid``
      - ``False``
-     - Convert ``"snapshot"`` to an actual frame ID
+     - When ``True``, resolve ``"snapshot"`` in ``frame_set`` to the
+       event's ``MaxScoreFrameId`` via the ZM API before fetching. Gives
+       results a concrete frame number, lets dedup against numeric
+       entries, and stabilizes the frame ID against later score updates.
+       Default ``False`` passes ``fid=snapshot`` through to ZM unchanged.
 
 In YAML (``stream_sequence`` dict), ``from_dict()`` accepts string
 conventions: ``resize: "no"`` → ``None``, ``resize: "800"`` → ``800``,

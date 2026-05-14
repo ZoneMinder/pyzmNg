@@ -661,7 +661,7 @@ class TestStreamConfigVariants:
         sc = StreamConfig.from_dict({})
         assert sc.resize is None
         assert sc.frame_set == ["snapshot", "alarm", "1"]
-        assert sc.convert_snapshot_to_fid is True
+        assert sc.convert_snapshot_to_fid is False
         assert sc.save_frames is False
 
     def test_download_bool_string(self):
