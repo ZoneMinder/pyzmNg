@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.3.6] - 2026-05-16
+
+### Bug Fixes
+
+- default convert_snapshot_to_fid to False ([1b5ba74](https://github.com/pliablepixels/pyzm/commit/1b5ba74c44c979a239498f9ee08f1a57c2c213c4))
+
+### Documentation
+
+- explain log path resolution and add testing recipes ([2312b0a](https://github.com/pliablepixels/pyzm/commit/2312b0a13bea7b2e3ead4a6762663ab8e98d92e3))
+
+### Miscellaneous
+
+- bump version to v2.3.6 ([1a9ccd8](https://github.com/pliablepixels/pyzm/commit/1a9ccd842a31e8e46691ebe25e6ff414e4775d97))
+
 ## [2.3.5] - 2026-05-12
 
 ### Bug Fixes
@@ -11,6 +25,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- update CHANGELOG for v2.3.5 ([24a16a6](https://github.com/pliablepixels/pyzm/commit/24a16a67c3909e5a699d4390671cd356ad291dac))
 - rename zmNinjaNG to zmNinjaNg for consistent casing ([832db72](https://github.com/pliablepixels/pyzm/commit/832db7248d002c4cd7772159a9fc8fad2f03e8ac))
 
 ### Features
