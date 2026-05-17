@@ -725,7 +725,7 @@ def _parse_zone_coords(coords_str: str) -> list[tuple[float, float]]:
     """Parse ZM zone coordinate string like ``"0,0 639,0 639,479 0,479"``.
 
     Coordinates may be integers (pixels) or floats (percentages, ZM 1.37+).
-    Ref: pliablepixels/zmeventnotification#18
+    Ref: ZoneMinder/zmeventnotificationNg#18
     """
     if not coords_str:
         return []

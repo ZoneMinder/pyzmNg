@@ -334,7 +334,7 @@ class TestMonitorOOP:
 
     @patch("pyzm.client.ZMAPI")
     def test_monitor_get_zones_float_coords(self, mock_zmapi_cls):
-        """Percentage-based coords (floats) must parse without error. Ref: pliablepixels/zmeventnotification#18"""
+        """Percentage-based coords (floats) must parse without error. Ref: ZoneMinder/zmeventnotificationNg#18"""
         mock_api = _make_mock_api()
         mock_api.get.side_effect = [
             {"monitors": [_sample_monitor_api_data(1, "Front Door")]},

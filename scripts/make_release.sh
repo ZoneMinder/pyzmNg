@@ -13,8 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_DIR"
 
-# Always target the pliablepixels fork, never upstream
-GH_REPO="pliablepixels/pyzm"
+GH_REPO="ZoneMinder/pyzmNg"
 
 # --- Read version from pyzm/__init__.py ---
 INIT_FILE="pyzm/__init__.py"
