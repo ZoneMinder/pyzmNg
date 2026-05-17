@@ -11,7 +11,7 @@ It provides:
 - A web UI for fine-tuning YOLO models on your own data (``pyzm.train``)
 - Pydantic v2 configuration models and typed detection results
 
-`Source on GitHub <https://github.com/pliablepixels/pyzm>`__
+`Source on GitHub <https://github.com/ZoneMinder/pyzmNg>`__
 
 See :doc:`guide/installation` for detailed instructions, including notes on
 system-managed Python environments.

@@ -68,8 +68,8 @@ OpenCV shim, and ownership in one step.
 
 .. code-block:: bash
 
-   git clone https://github.com/pliablepixels/pyzm.git
-   cd pyzm
+   git clone https://github.com/ZoneMinder/pyzmNg.git
+   cd pyzmNg
 
    # Everything (ZM + ML + detection server + training UI):
    sudo ./scripts/setup_venv.sh --extras full
@@ -186,7 +186,7 @@ Upgrading
 
 .. code-block:: bash
 
-   cd pyzm
+   cd pyzmNg
    git pull
    sudo ./scripts/setup_venv.sh --extras full   # same extras you used before
 
