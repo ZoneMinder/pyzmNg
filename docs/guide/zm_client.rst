@@ -48,6 +48,12 @@ Constructor parameters
    * - ``timeout``
      - ``30``
      - HTTP request timeout in seconds
+   * - ``max_retries``
+     - ``3``
+     - Retries for transient failures (connection drops, ``502/503/504``)
+       per request, with exponential backoff. Only idempotent methods
+       (GET/PUT/DELETE) are retried; POST is never replayed. Set ``0`` to
+       disable.
    * - ``db_user``
      - ``None``
      - Override the ZM database username (normally read from ``zm.conf``)

@@ -13,6 +13,8 @@ import logging
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from pyzm.models.config import ZMClientConfig
 from pyzm.zm.auth import AuthManager
@@ -36,6 +38,24 @@ class ZMAPI:
 
         # Build session
         self._session = requests.Session()
+
+        # Retry transient failures (connection drops, 502/503/504) so a
+        # recycled Apache/PHP-FPM worker or brief overload doesn't crash the
+        # caller.  Limited to idempotent methods by urllib3's default
+        # ``allowed_methods``, so POST/PUT are never silently replayed.
+        if config.max_retries > 0:
+            retry = Retry(
+                total=config.max_retries,
+                connect=config.max_retries,
+                read=config.max_retries,
+                status=config.max_retries,
+                backoff_factor=0.5,
+                status_forcelist=(502, 503, 504),
+                raise_on_status=False,
+            )
+            adapter = HTTPAdapter(max_retries=retry)
+            self._session.mount("http://", adapter)
+            self._session.mount("https://", adapter)
 
         if config.basic_auth_user:
             logger.debug("Configuring basic auth for session")

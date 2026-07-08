@@ -88,6 +88,7 @@ class ZMClientConfig(BaseModel):
     basic_auth_password: SecretStr | None = None
     verify_ssl: bool = True
     timeout: int = 30
+    max_retries: int = 3  # transient connection/5xx retries per request
 
     # Database credential overrides (None = use zm.conf / built-in defaults)
     db_user: str | None = None

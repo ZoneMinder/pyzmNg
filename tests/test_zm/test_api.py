@@ -80,6 +80,34 @@ class TestZMAPIConstruction:
         assert api.zm_version == "1.36.12"
         assert api.auth is mock_auth
 
+    @patch("pyzm.zm.api.AuthManager")
+    @patch("pyzm.zm.api.requests.Session")
+    def test_retry_adapter_mounted(self, mock_session_cls, mock_auth_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_auth_cls.return_value = _make_mock_auth()
+
+        ZMAPI(_make_config(max_retries=4))
+
+        mounted = {c.args[0]: c.args[1] for c in mock_session.mount.call_args_list}
+        assert set(mounted) == {"http://", "https://"}
+        retry = mounted["https://"].max_retries
+        assert retry.total == 4
+        assert retry.connect == 4
+        assert retry.read == 4
+        assert 502 in retry.status_forcelist
+
+    @patch("pyzm.zm.api.AuthManager")
+    @patch("pyzm.zm.api.requests.Session")
+    def test_retry_adapter_skipped_when_disabled(self, mock_session_cls, mock_auth_cls):
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        mock_auth_cls.return_value = _make_mock_auth()
+
+        ZMAPI(_make_config(max_retries=0))
+
+        mock_session.mount.assert_not_called()
+
 
 # ===================================================================
 # TestZMAPI - request()
