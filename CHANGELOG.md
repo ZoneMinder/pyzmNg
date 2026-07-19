@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.3.8] - 2026-07-19
+
+### Features
+
+- auto-discover zm.conf across common locations ([4c472d3](https://github.com/ZoneMinder/pyzmNg/commit/4c472d39b45ab87058c023adc2a8a329a40bd58b))
+
+### Miscellaneous
+
+- bump version to v2.3.8 ([9358162](https://github.com/ZoneMinder/pyzmNg/commit/9358162ae144e0c6a47595d469fb1cac3592655f))
+
 ## [2.3.7] - 2026-06-03
 
 ### Bug Fixes
@@ -11,6 +21,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- update CHANGELOG for v2.3.7 ([4294a7e](https://github.com/ZoneMinder/pyzmNg/commit/4294a7e383b9e541c99b25fdad00b55615ef85f2))
 - point repo references to ZoneMinder/pyzmNg ([bd8ebbb](https://github.com/ZoneMinder/pyzmNg/commit/bd8ebbbbb583d20d5e9eeeb8029602e793ddbae8))
 
 ### Miscellaneous
