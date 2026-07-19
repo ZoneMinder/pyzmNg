@@ -62,8 +62,10 @@ Constructor parameters
      - Override the ZM database name
    * - ``conf_path``
      - ``None``
-     - Path to the ZM config directory (default ``/etc/zm``). Useful when
-       ``zm.conf`` lives in a non-standard location.
+     - Path to the ZM config directory. When unset, pyzm honors the
+       ``PYZM_CONFPATH`` env var, then auto-discovers ``zm.conf`` across
+       ``/etc/zm``, ``/config``, and ``/etc/zoneminder``. Set this to force a
+       non-standard location.
    * - ``config``
      - ``None``
      - A pre-built ``ZMClientConfig``. When provided, all other keyword
@@ -86,8 +88,11 @@ Database access
 Some operations — ``ev.tag()``, ``ev.path()``, ``ev.save_objdetect()``
 (when no ``path_override`` is given), and audio extraction for BirdNET —
 require a direct MySQL connection to the ZM database.  By
-default, pyzm reads credentials from ``/etc/zm/zm.conf`` (the same file
-ZoneMinder uses).
+default, pyzm reads credentials from ``zm.conf`` (the same file
+ZoneMinder uses).  It looks for that file first at ``PYZM_CONFPATH`` (if
+the env var is set), then auto-discovers it across ``/etc/zm``,
+``/config`` (common in containerized ZoneMinder), and ``/etc/zoneminder``.
+Pass ``conf_path`` to force a specific directory.
 
 If the user running pyzm cannot read ``zm.conf`` (e.g. permission
 denied), you can pass database credentials explicitly:
@@ -109,9 +114,12 @@ denied), you can pass database credentials explicitly:
 
 The merge strategy is:
 
-1. Try to read ``zm.conf`` (or ``conf_path`` if set).
-2. Overlay any explicit ``db_*`` parameters — explicit values always win.
-3. Fall back to ``"localhost"`` for host and ``"zm"`` for database name.
+1. Resolve the config directory: ``conf_path`` if set, else
+   ``PYZM_CONFPATH``, else the first of ``/etc/zm`` / ``/config`` /
+   ``/etc/zoneminder`` that contains a ``zm.conf``.
+2. Try to read ``zm.conf`` from that directory.
+3. Overlay any explicit ``db_*`` parameters — explicit values always win.
+4. Fall back to ``"localhost"`` for host and ``"zm"`` for database name.
 
 Accessing the full API response
 --------------------------------

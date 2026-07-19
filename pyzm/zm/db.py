@@ -1,7 +1,10 @@
 """Direct MySQL connection to the ZoneMinder database.
 
-Reads credentials from ``/etc/zm/zm.conf`` (and ``conf.d/*.conf``) —
-the same files that ZM itself uses.  Explicit overrides take precedence.
+Reads credentials from ``zm.conf`` (and ``conf.d/*.conf``) — the same files
+that ZM itself uses.  The directory is resolved by :func:`_resolve_conf_path`:
+an explicit ``conf_path`` or the ``PYZM_CONFPATH`` env var wins, otherwise a
+few well-known locations are probed (handles containerized ZM, which keeps
+config under ``/config``).  Explicit credential overrides take precedence.
 """
 
 from __future__ import annotations
@@ -14,6 +17,32 @@ import os
 logger = logging.getLogger("pyzm.zm")
 
 _CONF_PATH = os.environ.get("PYZM_CONFPATH", "/etc/zm")
+
+# Well-known directories to probe for zm.conf, in order, when neither an
+# explicit conf_path nor PYZM_CONFPATH is provided. /etc/zm is the default
+# install location; /config is the common container layout; /etc/zoneminder
+# is used by some distro packages.
+_CONF_SEARCH_PATHS = ("/etc/zm", "/config", "/etc/zoneminder")
+
+
+def _resolve_conf_path(conf_path: str | None = None) -> str:
+    """Return the directory to read ZM config from.
+
+    Priority: explicit ``conf_path`` argument, then the ``PYZM_CONFPATH`` env
+    var, then auto-discovery across :data:`_CONF_SEARCH_PATHS` (the first that
+    actually contains a ``zm.conf``). Falls back to ``/etc/zm`` when nothing is
+    found, preserving prior behaviour and its warnings.
+    """
+    if conf_path:
+        return conf_path
+    env = os.environ.get("PYZM_CONFPATH")
+    if env:
+        return env
+    for candidate in _CONF_SEARCH_PATHS:
+        if os.path.exists(os.path.join(candidate, "zm.conf")):
+            logger.debug("Auto-discovered ZM config at %s", candidate)
+            return candidate
+    return _CONF_SEARCH_PATHS[0]
 
 
 def _read_zm_conf(conf_path: str = _CONF_PATH) -> dict[str, str]:
@@ -62,7 +91,7 @@ def get_zm_db(
     # Start with zm.conf values (best-effort)
     has_explicit = any(v is not None for v in [db_user, db_password, db_host, db_name])
     try:
-        creds = _read_zm_conf(conf_path or _CONF_PATH)
+        creds = _read_zm_conf(_resolve_conf_path(conf_path))
     except (PermissionError, OSError) as exc:
         if has_explicit:
             logger.debug("Could not read zm.conf: %s (using explicit credentials)", exc)

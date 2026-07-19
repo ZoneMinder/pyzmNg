@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pyzm.zm.db import _read_zm_conf, get_zm_db
+from pyzm.zm.db import _read_zm_conf, _resolve_conf_path, get_zm_db
 
 
 class TestReadZmConf:
@@ -244,3 +244,59 @@ class TestClientGetDb:
             db_name=None,
             conf_path=None,
         )
+
+
+class TestResolveConfPath:
+    """Tests for _resolve_conf_path() priority and auto-discovery (issue #54)."""
+
+    def test_explicit_conf_path_wins(self, monkeypatch):
+        """An explicit conf_path beats PYZM_CONFPATH and discovery."""
+        monkeypatch.setenv("PYZM_CONFPATH", "/env/path")
+        assert _resolve_conf_path("/explicit") == "/explicit"
+
+    def test_env_var_wins_over_discovery(self, monkeypatch):
+        """PYZM_CONFPATH is used when no explicit conf_path is given."""
+        monkeypatch.setenv("PYZM_CONFPATH", "/env/path")
+        assert _resolve_conf_path() == "/env/path"
+
+    def test_autodiscovers_first_dir_with_zm_conf(self, monkeypatch, tmp_path):
+        """Discovery returns the first search path that contains a zm.conf."""
+        monkeypatch.delenv("PYZM_CONFPATH", raising=False)
+        empty = tmp_path / "empty"
+        has_conf = tmp_path / "config"
+        empty.mkdir()
+        has_conf.mkdir()
+        (has_conf / "zm.conf").write_text("ZM_DB_NAME=zm\n")
+        monkeypatch.setattr(
+            "pyzm.zm.db._CONF_SEARCH_PATHS", (str(empty), str(has_conf))
+        )
+        assert _resolve_conf_path() == str(has_conf)
+
+    def test_falls_back_to_first_path_when_none_found(self, monkeypatch, tmp_path):
+        """With no zm.conf anywhere, fall back to the first search path."""
+        monkeypatch.delenv("PYZM_CONFPATH", raising=False)
+        a = tmp_path / "a"
+        b = tmp_path / "b"
+        a.mkdir()
+        b.mkdir()
+        monkeypatch.setattr("pyzm.zm.db._CONF_SEARCH_PATHS", (str(a), str(b)))
+        assert _resolve_conf_path() == str(a)
+
+    @patch("mysql.connector.connect")
+    def test_get_zm_db_autodiscovers_conf(self, mock_connect, monkeypatch, tmp_path):
+        """get_zm_db reads creds from a discovered zm.conf when no path given."""
+        monkeypatch.delenv("PYZM_CONFPATH", raising=False)
+        confdir = tmp_path / "config"
+        confdir.mkdir()
+        (confdir / "zm.conf").write_text(
+            "ZM_DB_USER=disc_user\nZM_DB_PASS=p\nZM_DB_HOST=disc_host\nZM_DB_NAME=d\n"
+        )
+        monkeypatch.setattr(
+            "pyzm.zm.db._CONF_SEARCH_PATHS", (str(tmp_path / "none"), str(confdir))
+        )
+
+        get_zm_db()
+
+        call_kwargs = mock_connect.call_args[1]
+        assert call_kwargs["user"] == "disc_user"
+        assert call_kwargs["host"] == "disc_host"
