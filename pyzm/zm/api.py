@@ -42,7 +42,8 @@ class ZMAPI:
         # Retry transient failures (connection drops, 502/503/504) so a
         # recycled Apache/PHP-FPM worker or brief overload doesn't crash the
         # caller.  Limited to idempotent methods by urllib3's default
-        # ``allowed_methods``, so POST/PUT are never silently replayed.
+        # ``allowed_methods`` (GET/HEAD/PUT/DELETE/OPTIONS/TRACE), so POST is
+        # never silently replayed.
         if config.max_retries > 0:
             retry = Retry(
                 total=config.max_retries,

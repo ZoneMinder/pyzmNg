@@ -108,6 +108,22 @@ class TestZMAPIConstruction:
 
         mock_session.mount.assert_not_called()
 
+    @patch("pyzm.zm.api.AuthManager")
+    def test_retry_policy_replays_idempotent_only(self, mock_auth_cls):
+        """Transient 5xx retries idempotent methods only; POST is never
+        replayed (issue #51)."""
+        mock_auth_cls.return_value = _make_mock_auth()
+
+        api = ZMAPI(_make_config(max_retries=3))
+
+        retry = api.session.get_adapter("https://zm.example.com").max_retries
+        # Idempotent methods are retried on a transient 5xx.
+        assert retry.is_retry("GET", 502) is True
+        assert retry.is_retry("PUT", 503) is True
+        assert retry.is_retry("DELETE", 504) is True
+        # POST is not idempotent -> never silently replayed.
+        assert retry.is_retry("POST", 502) is False
+
 
 # ===================================================================
 # TestZMAPI - request()
