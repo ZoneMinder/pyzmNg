@@ -787,7 +787,7 @@ class TestDetectorRemoteMode:
 
     @patch("pyzm.ml.detector.Detector._remote_detect_urls")
     def test_detect_event_url_mode_default_frame_set(self, mock_remote_urls):
-        """URL-mode with empty frame_set defaults to ['snapshot']."""
+        """URL-mode: empty frame_set + no max_frames falls back to [snapshot, alarm, 1]."""
         from pyzm.ml.detector import Detector
 
         mock_remote_urls.return_value = DetectionResult()
@@ -799,12 +799,14 @@ class TestDetectorRemoteMode:
         mock_zm.api.config.verify_ssl = True
 
         from pyzm.models.config import StreamConfig
-        sc = StreamConfig(frame_set=[])
+        sc = StreamConfig(frame_set=[], max_frames=0)
 
         det.detect_event(mock_zm, 999, stream_config=sc)
         frame_urls = mock_remote_urls.call_args[0][0]
-        assert len(frame_urls) == 1
+        assert len(frame_urls) == 3
         assert frame_urls[0]["frame_id"] == "snapshot"
+        assert frame_urls[1]["frame_id"] == "alarm"
+        assert frame_urls[2]["frame_id"] == "1"
 
     def test_detect_event_url_mode_requires_api(self):
         """URL-mode raises AttributeError if zm_client has no .api."""
@@ -1748,3 +1750,95 @@ class TestRemoteDetectUrlsFiltering:
 
         result = det._remote_detect_urls([], zm_auth="")
         assert not result.matched
+
+
+class TestDetectEventFrameSelection:
+    """Tests for the three-way frame selection logic in detect_event (URL gateway mode)."""
+
+    def _make_detector(self, gateway="http://gpu:5000"):
+        from pyzm.ml.detector import Detector
+        det = Detector.__new__(Detector)
+        det._config = DetectorConfig(pattern=".*")
+        det._pipeline = None
+        det._gateway = gateway
+        det._gateway_mode = "url"
+        det._gateway_token = None
+        det._gateway_timeout = 10
+        det._gateway_username = None
+        det._gateway_password = None
+        return det
+
+    def _make_zm_client(self, portal="http://zm"):
+        zm = MagicMock()
+        zm.api.portal_url = portal
+        zm.api.auth.get_auth_string.return_value = "token=abc"
+        zm.api.config.verify_ssl = True
+        return zm
+
+    @patch("pyzm.ml.detector.requests")
+    def test_frame_set_explicit_uses_frame_set(self, mock_requests):
+        """When frame_set has values, they are used as-is."""
+        from pyzm.models.config import StreamConfig
+        from pyzm.ml.detector import Detector
+
+        det = self._make_detector()
+        zm = self._make_zm_client()
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"results": []}
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.post.return_value = mock_resp
+
+        sc = StreamConfig(frame_set=["snapshot", "alarm", "50"])
+        try:
+            det.detect_event(zm, event_id=1, stream_config=sc)
+        except Exception:
+            pass
+        call_kwargs = mock_requests.post.call_args.kwargs
+        frame_ids = [u["frame_id"] for u in call_kwargs["json"]["urls"]]
+        assert frame_ids == ["snapshot", "alarm", "50"]
+
+    @patch("pyzm.ml.detector.requests")
+    def test_frame_set_empty_with_max_frames_uses_skip(self, mock_requests):
+        """When frame_set=[] and max_frames>0, uses start_frame+frame_skip."""
+        from pyzm.models.config import StreamConfig
+
+        det = self._make_detector()
+        zm = self._make_zm_client()
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"results": []}
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.post.return_value = mock_resp
+
+        sc = StreamConfig(frame_set=[], start_frame=50, frame_skip=25, max_frames=4)
+        try:
+            det.detect_event(zm, event_id=1, stream_config=sc)
+        except Exception:
+            pass
+        payload = mock_requests.post.call_args[1]["json"]
+        frame_ids = [u["frame_id"] for u in payload["urls"]]
+        assert frame_ids == ["50", "75", "100", "125"]
+
+    @patch("pyzm.ml.detector.requests")
+    def test_frame_set_empty_without_max_frames_falls_back(self, mock_requests):
+        """When frame_set=[] and max_frames=0, falls back to default snapshot/alarm/1."""
+        from pyzm.models.config import StreamConfig
+
+        det = self._make_detector()
+        zm = self._make_zm_client()
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"results": []}
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.post.return_value = mock_resp
+
+        sc = StreamConfig(frame_set=[], max_frames=0)
+        try:
+            det.detect_event(zm, event_id=1, stream_config=sc)
+        except Exception:
+            pass
+        # Should fall back to default frame_set
+        call_kwargs = mock_requests.post.call_args.kwargs
+        frame_ids = [u["frame_id"] for u in call_kwargs["json"]["urls"]]
+        assert frame_ids == ["snapshot", "alarm", "1"]

@@ -391,10 +391,10 @@ class Detector:
         zones: list["Zone"] | None = None,
         verify_ssl: bool = True,
         original_shape: tuple[int, int] | None = None,
-        contig_frames_before_error: int = 3,
-        stop_on_match: bool = False,
+        contig_frames_before_error: int = 5,
+        stop_on_match: bool = True,
         max_attempts: int = 1,
-        sleep_between_attempts: int = 2,
+        sleep_between_attempts: int = 3,
         min_confidence: float = 0.3,
         pattern: str = ".*",
     ) -> DetectionResult:

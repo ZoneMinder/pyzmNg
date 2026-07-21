@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import uvicorn
 
 
 def main() -> None:
@@ -77,7 +79,6 @@ def main() -> None:
 
     from pyzm.serve.app import create_app
 
-    import uvicorn, os
     if config.workers > 1:
         # Serialize config to env var so each worker process can reconstruct
         # it via get_app() without re-parsing CLI arguments.

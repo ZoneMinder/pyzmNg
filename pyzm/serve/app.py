@@ -1,7 +1,7 @@
 """FastAPI application factory for the pyzm ML detection server."""
 
 from __future__ import annotations
-
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -31,7 +31,7 @@ def get_app() -> FastAPI:
     import json, logging, os
     raw = os.environ.get("PYZM_SERVER_CONFIG")
     config = ServerConfig.model_validate(json.loads(raw)) if raw else ServerConfig()
-    level = logging.DEBUG if config.log_level == "debug" else logging.INFO
+    level = getattr(logging, config.log_level.upper(), logging.INFO)
     logging.basicConfig(level=level, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     logging.getLogger("pyzm").setLevel(level)
     return create_app(config)
@@ -162,9 +162,8 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                     fetched = False
                     for attempt in range(1, max_attempts + 1):
                         if attempt > 1:
-                            import time
                             logger.info("Frame %s: does not exist yet, retrying in %ds (attempt %d/%d)", fid, sleep_secs, attempt, max_attempts)
-                            time.sleep(sleep_secs)
+                            await asyncio.sleep(sleep_secs)
                             resp2 = http_requests.get(url, timeout=10, verify=verify_ssl)
                             if resp2.status_code != 404:
                                 resp = resp2
@@ -215,11 +214,12 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             data.pop("image", None)
             data["frame_id"] = fid
 
-            # 3. Zone filter + short-circuit: check whether any surviving
-            #    detection falls inside the requested zone polygons.
-            #    When stop_on_match is True (default) we stop as soon as we
-            #    find a frame with an in-zone detection, avoiding unnecessary
-            #    inference on the remaining frames.
+            # 3. Zone short-circuit: check whether any surviving detection
+            #    falls inside the requested zone polygons.
+            #    NOTE: we do NOT reassign result.detections here — all detections
+            #    (in-zone and out-of-zone) are returned to the client so it can
+            #    apply its own zone filtering and log what was discarded.
+            #    The zone check here is only used to drive stop_on_match.
             zones_data = payload.get("zones", [])
             has_zone_match = True
             if zones_data and result.detections:

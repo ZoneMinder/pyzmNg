@@ -547,7 +547,7 @@ class ServerConfig(BaseModel):
         default="info",
         description=(
             "Logging level propagated to each worker process. "
-            "Accepted values: debug, info, warning, error. "
+            "Any standard Python logging level name (debug, info, warning, error, critical). "
             "When --debug is passed on the CLI this is overridden to debug automatically."
         ),
     )
