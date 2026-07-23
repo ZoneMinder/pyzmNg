@@ -318,6 +318,11 @@ CLI options
    * - ``--debug``
      - off
      - Enable debug logging for both pyzm and uvicorn
+   * - ``--workers``
+     - ``1``
+     - Number of uvicorn worker processes. Each worker loads its own copy of
+       the model(s) into memory, enabling parallel inference across
+       simultaneous events. Useful on **CPU**; see *Multi-worker* below.
    * - ``--config``
      - (none)
      - Path to a YAML config file (``ServerConfig``). Overrides CLI flags.
@@ -348,9 +353,36 @@ Example ``serve.yml``:
    auth_password: "my-secret-password"
    token_secret: "a-strong-random-secret"
    token_expiry_seconds: 3600
+   workers: 3          # parallel worker processes (CPU)
+   log_level: info     # debug, info, warning, error, critical
 
 All fields correspond to ``ServerConfig`` attributes. When using
 ``--config``, CLI flags are ignored.
+
+
+Multi-worker (CPU parallelism)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default the server runs a single process. On **CPU**, each inference
+call is blocking (~500 ms/frame for YOLOv4), so simultaneous events queue
+up behind one another. Passing ``--workers N`` spawns ``N`` uvicorn worker
+processes, each with its own copy of the model(s), so events are handled
+truly in parallel:
+
+.. code-block:: bash
+
+   python -m pyzm.serve --models yolov4 --processor cpu --workers 3
+
+Notes:
+
+- Each worker loads the model independently (e.g. ~443 MB per worker for
+  YOLOv4 at 576×576), so memory scales with the worker count.
+- On **GPU**, a single worker is normally sufficient; extra workers
+  multiply VRAM usage without a meaningful throughput gain.
+- The parsed configuration (including auth credentials) is handed to the
+  workers automatically -- authentication works the same as single-worker
+  mode.
+- ``--workers`` is ignored on Windows.
 
 
 Client usage
@@ -384,6 +416,67 @@ Using the ``Detector`` API:
 
 URL mode only applies to ``detect_event()`` calls.  Single-image
 ``detect()`` calls always upload the image regardless of this setting.
+
+URL mode: frame selection, retry, and short-circuit
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In URL mode the following ``StreamConfig`` (``stream_sequence``) fields
+control which frames are analysed and how the gateway processes them.
+They are forwarded to the server as part of the request. All are optional
+and default to backwards-compatible behaviour.
+
+**Frame selection** -- how the list of frames to analyse is built:
+
+1. ``frame_set`` has values (default ``["snapshot", "alarm", "1"]``) --
+   the list is used as-is. Supports named frames (``snapshot``, ``alarm``)
+   and numeric frame IDs.
+2. ``frame_set`` is empty **and** ``max_frames > 0`` -- a sparse frame list
+   is generated from ``start_frame`` + ``frame_skip`` + ``max_frames``.
+   For example ``start_frame=50, frame_skip=25, max_frames=30`` analyses
+   frames ``[50, 75, 100, …, 775]``. This distributes analysis across a
+   long event without downloading every frame.
+3. ``frame_set`` is empty **and** ``max_frames`` is 0 -- falls back to
+   ``["snapshot", "alarm", "1"]`` (with a warning), so an empty
+   ``frame_set`` never silently collapses to a single frame.
+
+Existing installations that do not explicitly set ``frame_set: []`` are
+unaffected.
+
+**Retry for live events** -- when detection starts while frames are still
+being written to disk, the gateway retries missing frames (HTTP 404):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 12 58
+
+   * - Field
+     - Default
+     - Description
+   * - ``max_attempts``
+     - ``1``
+     - How many times the gateway fetches a 404 frame before treating it as
+       missing (``1`` = no retry).
+   * - ``sleep_between_attempts``
+     - ``3``
+     - Seconds to wait between retry attempts for a missing frame.
+   * - ``contig_frames_before_error``
+     - ``5``
+     - Stop processing after this many **consecutive** missing frames
+       (end-of-event detection). The counter resets on any frame fetched
+       successfully.
+
+**Short-circuit** -- ``stop_on_match`` (default ``True``) lets the gateway
+stop as soon as one frame produces a detection that passes all server-side
+filters (confidence, pattern, and zone), avoiding inference on the
+remaining frames.
+
+.. note::
+
+   Short-circuiting only takes effect for the ``first`` and ``first_new``
+   frame strategies. The ``most``, ``most_unique`` and ``most_models``
+   strategies must examine every frame to pick the best one, so the client
+   automatically suppresses ``stop_on_match`` for them regardless of the
+   configured value.
 
 Using ``from_dict()``
 ~~~~~~~~~~~~~~~~~~~~~~

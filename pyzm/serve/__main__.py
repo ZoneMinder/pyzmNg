@@ -82,7 +82,9 @@ def main() -> None:
     if config.workers > 1:
         # Serialize config to env var so each worker process can reconstruct
         # it via get_app() without re-parsing CLI arguments.
-        os.environ["PYZM_SERVER_CONFIG"] = config.model_dump_json()
+        from pyzm.serve.app import config_to_env
+
+        os.environ["PYZM_SERVER_CONFIG"] = config_to_env(config)
         uvicorn.run(
             "pyzm.serve.app:get_app",
             host=config.host,

@@ -10,10 +10,42 @@ import requests as http_requests
 from fastapi import Body, Depends, FastAPI, File, HTTPException, UploadFile
 
 from pyzm.ml.detector import Detector
+from pyzm.ml.filters import filter_by_pattern, filter_by_zone
 from pyzm.models.config import ServerConfig
 from pyzm.serve.auth import create_login_route, create_token_dependency
 
 logger = logging.getLogger("pyzm.serve")
+
+# Env var used to hand the parsed ServerConfig to uvicorn worker processes.
+_CONFIG_ENV_VAR = "PYZM_SERVER_CONFIG"
+
+
+def config_to_env(config: ServerConfig) -> str:
+    """Serialise a ServerConfig to JSON for the worker env var.
+
+    ``model_dump_json()`` masks SecretStr fields (auth_password) as
+    ``"**********"``, which would silently break /login in every worker.
+    We inject the real secret value so workers authenticate correctly.
+    Paired with :func:`config_from_env`.
+    """
+    import json
+
+    data = config.model_dump(mode="json")
+    data["auth_password"] = config.auth_password.get_secret_value()
+    return json.dumps(data)
+
+
+def config_from_env() -> ServerConfig:
+    """Reconstruct a ServerConfig from the worker env var.
+
+    Falls back to a default ServerConfig when the variable is absent
+    (single-worker mode).  Paired with :func:`config_to_env`.
+    """
+    import json
+    import os
+
+    raw = os.environ.get(_CONFIG_ENV_VAR)
+    return ServerConfig.model_validate(json.loads(raw)) if raw else ServerConfig()
 
 
 def get_app() -> FastAPI:
@@ -28,9 +60,7 @@ def get_app() -> FastAPI:
     Logging is configured here so that each worker inherits the correct level
     independently of the parent process.
     """
-    import json, logging, os
-    raw = os.environ.get("PYZM_SERVER_CONFIG")
-    config = ServerConfig.model_validate(json.loads(raw)) if raw else ServerConfig()
+    config = config_from_env()
     level = getattr(logging, config.log_level.upper(), logging.INFO)
     logging.basicConfig(level=level, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     logging.getLogger("pyzm").setLevel(level)
@@ -140,7 +170,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         results = []
         # Track consecutive 404s to detect end-of-event early
         consecutive_404 = 0
-        max_consecutive_404 = payload.get("contig_frames_before_error", 3)
+        max_consecutive_404 = payload.get("contig_frames_before_error", 5)
 
         for entry in urls:
             fid = str(entry.get("frame_id", ""))
@@ -158,7 +188,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                     # Frame may not exist yet (live event still being written).
                     # Retry up to max_attempts times before counting as missing.
                     max_attempts = payload.get("max_attempts", 1)
-                    sleep_secs = payload.get("sleep_between_attempts", 2)
+                    sleep_secs = payload.get("sleep_between_attempts", 3)
                     fetched = False
                     for attempt in range(1, max_attempts + 1):
                         if attempt > 1:
@@ -207,7 +237,6 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             #    (e.g. "(person)" to ignore dog/cat detections).
             pattern = payload.get("pattern", ".*")
             if pattern and pattern != ".*":
-                from pyzm.ml.filters import filter_by_pattern
                 result.detections = filter_by_pattern(result.detections, pattern)
 
             data = result.to_dict()
@@ -223,7 +252,6 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             zones_data = payload.get("zones", [])
             has_zone_match = True
             if zones_data and result.detections:
-                from pyzm.ml.filters import filter_by_zone
                 h, w = image.shape[:2]
                 kept, _ = filter_by_zone(result.detections, zones_data, (h, w))
                 has_zone_match = len(kept) > 0

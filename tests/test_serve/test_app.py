@@ -60,6 +60,44 @@ def client():
 # Tests
 # ---------------------------------------------------------------------------
 
+class TestWorkerConfigEnv:
+    """Round-trip of ServerConfig through the worker env var.
+
+    Regression guard: model_dump_json() masks SecretStr (auth_password) as
+    "**********", which silently broke /login in every uvicorn worker when
+    --workers > 1.  config_to_env must preserve the real secret.
+    """
+
+    def test_config_to_env_preserves_auth_password(self):
+        from pyzm.serve.app import config_from_env, config_to_env
+
+        cfg = ServerConfig(
+            models=["yolov4"],
+            auth_enabled=True,
+            auth_username="admin",
+            auth_password="hunter2",
+            token_secret="topsecret",
+            workers=3,
+        )
+        raw = config_to_env(cfg)
+        assert "**********" not in raw
+
+        with patch.dict("os.environ", {"PYZM_SERVER_CONFIG": raw}):
+            restored = config_from_env()
+        assert restored.auth_password.get_secret_value() == "hunter2"
+        assert restored.token_secret == "topsecret"
+        assert restored.workers == 3
+
+    def test_config_from_env_absent_returns_default(self):
+        import os
+
+        from pyzm.serve.app import config_from_env
+
+        with patch.dict(os.environ, {}, clear=True):
+            cfg = config_from_env()
+        assert cfg.workers == 1
+
+
 class TestHealth:
     def test_health_ok(self, client):
         resp = client.get("/health")

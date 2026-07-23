@@ -462,6 +462,22 @@ Controls frame extraction from ZM events:
        results a concrete frame number, lets dedup against numeric
        entries, and stabilizes the frame ID against later score updates.
        Default ``False`` passes ``fid=snapshot`` through to ZM unchanged.
+   * - ``stop_on_match``
+     - ``True``
+     - Remote-gateway URL mode only. Lets the gateway stop as soon as one
+       frame passes all server-side filters (confidence, pattern, zone),
+       skipping inference on the rest. Applies only to the ``first`` /
+       ``first_new`` frame strategies (the ``most*`` strategies always
+       process every frame). See :doc:`serve`.
+
+.. note::
+
+   In remote-gateway URL mode, an empty ``frame_set`` combined with
+   ``max_frames > 0`` triggers sparse sampling from ``start_frame`` /
+   ``frame_skip`` / ``max_frames``, and ``max_attempts`` /
+   ``sleep_between_attempts`` / ``contig_frames_before_error`` drive
+   gateway-side retry of frames not yet written (live events). See
+   :doc:`serve` for details.
 
 In YAML (``stream_sequence`` dict), ``from_dict()`` accepts string
 conventions: ``resize: "no"`` → ``None``, ``resize: "800"`` → ``800``,

@@ -1842,3 +1842,30 @@ class TestDetectEventFrameSelection:
         call_kwargs = mock_requests.post.call_args.kwargs
         frame_ids = [u["frame_id"] for u in call_kwargs["json"]["urls"]]
         assert frame_ids == ["snapshot", "alarm", "1"]
+
+    def _forwarded_stop_on_match(self, mock_requests, det, zm):
+        from pyzm.models.config import StreamConfig
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"results": []}
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.post.return_value = mock_resp
+        try:
+            det.detect_event(zm, event_id=1, stream_config=StreamConfig(stop_on_match=True))
+        except Exception:
+            pass
+        return mock_requests.post.call_args.kwargs["json"]["stop_on_match"]
+
+    @patch("pyzm.ml.detector.requests")
+    def test_stop_on_match_forwarded_for_first_strategy(self, mock_requests):
+        """FIRST/FIRST_NEW strategies may short-circuit: stop_on_match forwarded True."""
+        det = self._make_detector()
+        det._config.frame_strategy = FrameStrategy.FIRST
+        assert self._forwarded_stop_on_match(mock_requests, det, self._make_zm_client()) is True
+
+    @patch("pyzm.ml.detector.requests")
+    def test_stop_on_match_suppressed_for_most_strategy(self, mock_requests):
+        """most*/best strategies need every frame: stop_on_match forced False."""
+        det = self._make_detector()
+        det._config.frame_strategy = FrameStrategy.MOST_MODELS
+        assert self._forwarded_stop_on_match(mock_requests, det, self._make_zm_client()) is False

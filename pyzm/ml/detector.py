@@ -660,10 +660,18 @@ class Detector:
             min_conf = min((mc.min_confidence for mc in self._config.models if mc.enabled), default=0.3)
             patterns = list({mc.pattern for mc in self._config.models if mc.enabled and mc.pattern})
             pattern = patterns[0] if len(patterns) == 1 else ".*"
+            # Only let the gateway short-circuit when the frame strategy just
+            # wants the first match. The most*/best strategies must see every
+            # frame to pick the winner, so short-circuiting would silently
+            # degrade them to "first match" instead of "best frame".
+            stop_on_match = sc.stop_on_match and self._config.frame_strategy in (
+                FrameStrategy.FIRST,
+                FrameStrategy.FIRST_NEW,
+            )
             return self._remote_detect_urls(
                 frame_urls, auth_str, zones, verify_ssl,
                 contig_frames_before_error=sc.contig_frames_before_error,
-                stop_on_match=sc.stop_on_match,
+                stop_on_match=stop_on_match,
                 max_attempts=sc.max_attempts,
                 sleep_between_attempts=sc.sleep_between_attempts,
                 min_confidence=min_conf,
