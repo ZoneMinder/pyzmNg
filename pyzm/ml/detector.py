@@ -391,8 +391,38 @@ class Detector:
         zones: list["Zone"] | None = None,
         verify_ssl: bool = True,
         original_shape: tuple[int, int] | None = None,
+        contig_frames_before_error: int = 5,
+        stop_on_match: bool = True,
+        max_attempts: int = 1,
+        sleep_between_attempts: int = 3,
+        min_confidence: float = 0.3,
+        pattern: str = ".*",
     ) -> DetectionResult:
-        """Send frame URLs to the remote gateway, apply client-side filtering."""
+        """Send frame URLs to the remote gateway, apply client-side filtering.
+
+        Parameters
+        ----------
+        contig_frames_before_error:
+            Number of consecutive HTTP 404 responses before the gateway stops
+            processing (maps to stream_sequence.contig_frames_before_error).
+        stop_on_match:
+            When True the gateway stops as soon as one frame produces a
+            detection that passes all server-side filters (confidence, pattern
+            and zone).  Mirrors stream_sequence.stop_on_match.
+        max_attempts:
+            How many times the gateway retries a 404 frame before skipping it.
+            Useful for live events where frames are still being written.
+        sleep_between_attempts:
+            Seconds to wait between retry attempts for a missing frame.
+        min_confidence:
+            Minimum detection confidence forwarded to the gateway for
+            server-side filtering.  Derived from the lowest min_confidence
+            across all enabled models in the pipeline.
+        pattern:
+            Label-match regex forwarded to the gateway (e.g. "(person)").
+            Derived from the shared pattern across enabled models; falls back
+            to ".*" when models have different patterns.
+        """
         headers: dict[str, str] = {}
         token = self._ensure_gateway_token()
         if token:
@@ -402,6 +432,16 @@ class Detector:
             "urls": frame_urls,
             "zm_auth": zm_auth,
             "verify_ssl": verify_ssl,
+            # Gateway-side behaviour controls
+            "stop_on_match": stop_on_match,
+            "contig_frames_before_error": contig_frames_before_error,
+            "max_attempts": max_attempts,
+            "sleep_between_attempts": sleep_between_attempts,
+            # Server-side filters (applied before stop_on_match check)
+            "min_confidence": min_confidence,
+            "pattern": pattern,
+            # Zone polygons for server-side filtering and short-circuit
+            "zones": [z.as_dict() for z in zones] if zones else [],
         }
 
         resp = requests.post(
@@ -586,12 +626,49 @@ class Detector:
             auth_str = api.auth.get_auth_string()
             verify_ssl = api.config.verify_ssl
 
-            frame_ids = sc.frame_set if sc.frame_set else ["snapshot"]
+            if sc.frame_set:
+                # Explicit frame_set: use the provided list as-is.
+                # Supports named frames ("snapshot", "alarm") and numeric IDs.
+                frame_ids = sc.frame_set
+            elif sc.max_frames:
+                # Empty frame_set with max_frames configured: use the
+                # start_frame / frame_skip / max_frames sparse-sampling strategy.
+                # This is useful in URL gateway mode to distribute analysis
+                # evenly across a long event without downloading every frame.
+                # Example: start_frame=50, frame_skip=25, max_frames=30
+                #   → frames [50, 75, 100, ..., 775]
+                start = sc.start_frame or 1
+                skip = sc.frame_skip or 1
+                frame_ids = [str(start + i * skip) for i in range(sc.max_frames)]
+            else:
+                # frame_set is empty and max_frames is not configured (0).
+                # The caller has not explicitly chosen a frame-selection strategy,
+                # so fall back to the default behaviour to avoid silently
+                # analysing only a single frame.
+                logger.warning(
+                    "frame_set is empty but max_frames is not configured; "
+                    "falling back to default frame_set ['snapshot', 'alarm', '1']. "
+                    "To use sparse sampling, set max_frames (and optionally "
+                    "start_frame and frame_skip) in stream_sequence."
+                )
+                frame_ids = ["snapshot", "alarm", "1"]
             frame_urls = [
                 {"frame_id": str(fid), "url": f"{portal_url}/index.php?view=image&eid={event_id}&fid={fid}"}
                 for fid in frame_ids
             ]
-            return self._remote_detect_urls(frame_urls, auth_str, zones, verify_ssl)
+            # Extract per-model settings to forward to the gateway
+            min_conf = min((mc.min_confidence for mc in self._config.models if mc.enabled), default=0.3)
+            patterns = list({mc.pattern for mc in self._config.models if mc.enabled and mc.pattern})
+            pattern = patterns[0] if len(patterns) == 1 else ".*"
+            return self._remote_detect_urls(
+                frame_urls, auth_str, zones, verify_ssl,
+                contig_frames_before_error=sc.contig_frames_before_error,
+                stop_on_match=sc.stop_on_match,
+                max_attempts=sc.max_attempts,
+                sleep_between_attempts=sc.sleep_between_attempts,
+                min_confidence=min_conf,
+                pattern=pattern,
+            )
 
         # Get Event object and extract frames via OOP API
         ev = zm_client.event(event_id)

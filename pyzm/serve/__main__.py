@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import uvicorn
 
 
 def main() -> None:
@@ -30,6 +32,16 @@ def main() -> None:
     ap.add_argument("--auth-password", default="")
     ap.add_argument("--token-secret", default="change-me")
     ap.add_argument("--debug", action="store_true", help="Enable debug logging")
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Number of uvicorn worker processes to spawn. Each worker loads "
+            "the model independently, enabling parallel inference across "
+            "simultaneous events. Requires Python 3.8+ and is ignored on Windows."
+        ),
+    )
     ap.add_argument(
         "--config",
         help="Path to a YAML config file (ServerConfig). Overrides CLI flags.",
@@ -61,20 +73,32 @@ def main() -> None:
             auth_username=args.auth_user,
             auth_password=args.auth_password,
             token_secret=args.token_secret,
+            workers=args.workers,
+            log_level="debug" if args.debug else "info",
         )
 
     from pyzm.serve.app import create_app
 
-    app = create_app(config)
-
-    import uvicorn
-
-    uvicorn.run(
-        app,
-        host=config.host,
-        port=config.port,
-        log_level="debug" if args.debug else "info",
-    )
+    if config.workers > 1:
+        # Serialize config to env var so each worker process can reconstruct
+        # it via get_app() without re-parsing CLI arguments.
+        os.environ["PYZM_SERVER_CONFIG"] = config.model_dump_json()
+        uvicorn.run(
+            "pyzm.serve.app:get_app",
+            host=config.host,
+            port=config.port,
+            log_level="debug" if args.debug else "info",
+            workers=config.workers,
+            factory=True,
+        )
+    else:
+        app = create_app(config)
+        uvicorn.run(
+            app,
+            host=config.host,
+            port=config.port,
+            log_level="debug" if args.debug else "info",
+        )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """FastAPI application factory for the pyzm ML detection server."""
 
 from __future__ import annotations
-
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
@@ -14,6 +14,27 @@ from pyzm.models.config import ServerConfig
 from pyzm.serve.auth import create_login_route, create_token_dependency
 
 logger = logging.getLogger("pyzm.serve")
+
+
+def get_app() -> FastAPI:
+    """Factory entry point for uvicorn multi-worker mode.
+
+    Reads the server configuration from the PYZM_SERVER_CONFIG environment
+    variable (JSON-serialised ServerConfig) so that each worker
+    process spawned by uvicorn receives the same configuration as the parent
+    without having to re-parse CLI arguments.  Falls back to a default
+    ServerConfig when the variable is absent (single-worker mode).
+
+    Logging is configured here so that each worker inherits the correct level
+    independently of the parent process.
+    """
+    import json, logging, os
+    raw = os.environ.get("PYZM_SERVER_CONFIG")
+    config = ServerConfig.model_validate(json.loads(raw)) if raw else ServerConfig()
+    level = getattr(logging, config.log_level.upper(), logging.INFO)
+    logging.basicConfig(level=level, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    logging.getLogger("pyzm").setLevel(level)
+    return create_app(config)
 
 
 def create_app(config: ServerConfig | None = None) -> FastAPI:
@@ -117,6 +138,9 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
 
         detector: Detector = app.state.detector
         results = []
+        # Track consecutive 404s to detect end-of-event early
+        consecutive_404 = 0
+        max_consecutive_404 = payload.get("contig_frames_before_error", 3)
 
         for entry in urls:
             fid = str(entry.get("frame_id", ""))
@@ -130,6 +154,30 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
 
             try:
                 resp = http_requests.get(url, timeout=10, verify=verify_ssl)
+                if resp.status_code == 404:
+                    # Frame may not exist yet (live event still being written).
+                    # Retry up to max_attempts times before counting as missing.
+                    max_attempts = payload.get("max_attempts", 1)
+                    sleep_secs = payload.get("sleep_between_attempts", 2)
+                    fetched = False
+                    for attempt in range(1, max_attempts + 1):
+                        if attempt > 1:
+                            logger.info("Frame %s: does not exist yet, retrying in %ds (attempt %d/%d)", fid, sleep_secs, attempt, max_attempts)
+                            await asyncio.sleep(sleep_secs)
+                            resp2 = http_requests.get(url, timeout=10, verify=verify_ssl)
+                            if resp2.status_code != 404:
+                                resp = resp2
+                                fetched = True
+                                break
+                    if not fetched:
+                        consecutive_404 += 1
+                        logger.info("Frame %s: does not exist yet, skipping (%d consecutive)", fid, consecutive_404)
+                        if consecutive_404 >= max_consecutive_404:
+                            logger.info("Stopping after %d consecutive missing frames", consecutive_404)
+                            break
+                        continue
+                consecutive_404 = 0
+                logger.info("Frame %s: fetched OK, running inference", fid)
                 resp.raise_for_status()
                 arr = np.frombuffer(resp.content, dtype=np.uint8)
                 image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -141,10 +189,48 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                 continue
 
             result = detector.detect(image)
+
+            # --- Server-side filters ---
+            # 1. Confidence filter: drop detections below the threshold
+            #    forwarded by the client (derived from model min_confidence).
+            min_confidence = payload.get("min_confidence", 0.3)
+            filtered_low = [d for d in result.detections if d.confidence < min_confidence]
+            if filtered_low:
+                logger.info(
+                    "Frame %s: %d detection(s) below min_confidence %.0f%% filtered out: %s",
+                    fid, len(filtered_low), min_confidence * 100,
+                    [(d.label, round(d.confidence * 100)) for d in filtered_low],
+                )
+            result.detections = [d for d in result.detections if d.confidence >= min_confidence]
+
+            # 2. Pattern filter: keep only labels matching the client regex
+            #    (e.g. "(person)" to ignore dog/cat detections).
+            pattern = payload.get("pattern", ".*")
+            if pattern and pattern != ".*":
+                from pyzm.ml.filters import filter_by_pattern
+                result.detections = filter_by_pattern(result.detections, pattern)
+
             data = result.to_dict()
             data.pop("image", None)
             data["frame_id"] = fid
+
+            # 3. Zone short-circuit: check whether any surviving detection
+            #    falls inside the requested zone polygons.
+            #    NOTE: we do NOT reassign result.detections here — all detections
+            #    (in-zone and out-of-zone) are returned to the client so it can
+            #    apply its own zone filtering and log what was discarded.
+            #    The zone check here is only used to drive stop_on_match.
+            zones_data = payload.get("zones", [])
+            has_zone_match = True
+            if zones_data and result.detections:
+                from pyzm.ml.filters import filter_by_zone
+                h, w = image.shape[:2]
+                kept, _ = filter_by_zone(result.detections, zones_data, (h, w))
+                has_zone_match = len(kept) > 0
+
             results.append(data)
+            if payload.get("stop_on_match", True) and data.get("labels") and has_zone_match:
+                break
 
         return {"results": results}
 

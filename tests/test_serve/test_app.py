@@ -261,6 +261,7 @@ class TestDetectUrls:
                 {"frame_id": "snapshot", "url": "http://zm/image?fid=snapshot"},
                 {"frame_id": "alarm", "url": "http://zm/image?fid=alarm"},
             ],
+            "stop_on_match": False,
         }
         resp = client.post("/detect_urls", json=payload)
         assert resp.status_code == 200
@@ -268,3 +269,102 @@ class TestDetectUrls:
         assert len(data["results"]) == 2
         assert data["results"][0]["frame_id"] == "snapshot"
         assert data["results"][1]["frame_id"] == "alarm"
+
+    @pytest.mark.integration
+    @patch("pyzm.serve.app.http_requests")
+    def test_detect_urls_404_stops_after_consecutive_misses(self, mock_http, client):
+        """Stops after contig_frames_before_error consecutive 404s."""
+        not_found = MagicMock()
+        not_found.status_code = 404
+        mock_http.get.return_value = not_found
+
+        payload = {
+            "urls": [
+                {"frame_id": str(i), "url": f"http://zm/image?fid={i}"}
+                for i in range(10)
+            ],
+            "contig_frames_before_error": 3,
+            "max_attempts": 1,
+        }
+        resp = client.post("/detect_urls", json=payload)
+        assert resp.status_code == 200
+        # Should have stopped after 3 consecutive 404s, not processed all 10
+        assert mock_http.get.call_count == 3
+
+    @pytest.mark.integration
+    @patch("pyzm.serve.app.http_requests")
+    def test_detect_urls_404_resets_on_success(self, mock_http, client):
+        """Consecutive 404 counter resets when a frame is fetched successfully."""
+        jpeg_bytes = self._make_jpeg_bytes()
+        ok_resp = MagicMock()
+        ok_resp.content = jpeg_bytes
+        ok_resp.status_code = 200
+        ok_resp.raise_for_status = MagicMock()
+
+        not_found = MagicMock()
+        not_found.status_code = 404
+
+        # 2 404s, then 1 success, then 2 more 404s → should not stop (counter resets)
+        # With contig_frames_before_error=3, after reset only 2 consecutive → no stop
+        mock_http.get.side_effect = [not_found, not_found, ok_resp, not_found, not_found]
+
+        payload = {
+            "urls": [
+                {"frame_id": str(i), "url": f"http://zm/image?fid={i}"}
+                for i in range(5)
+            ],
+            "contig_frames_before_error": 3,
+            "max_attempts": 1,
+            "stop_on_match": False,
+        }
+        resp = client.post("/detect_urls", json=payload)
+        assert resp.status_code == 200
+        # All 5 frames should have been attempted
+        assert mock_http.get.call_count == 5
+
+    @pytest.mark.integration
+    @patch("pyzm.serve.app.http_requests")
+    def test_detect_urls_stop_on_match_stops_at_first_match(self, mock_http, client):
+        """stop_on_match=True stops after first frame with detection."""
+        jpeg_bytes = self._make_jpeg_bytes()
+        ok_resp = MagicMock()
+        ok_resp.content = jpeg_bytes
+        ok_resp.status_code = 200
+        ok_resp.raise_for_status = MagicMock()
+        mock_http.get.return_value = ok_resp
+        payload = {
+            "urls": [
+                {"frame_id": "1", "url": "http://zm/image?fid=1"},
+                {"frame_id": "2", "url": "http://zm/image?fid=2"},
+                {"frame_id": "3", "url": "http://zm/image?fid=3"},
+            ],
+            "stop_on_match": True,
+            "min_confidence": 0.5,
+        }
+        resp = client.post("/detect_urls", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+        # Mock detector returns person:0.95; should stop after first match
+        assert len(data["results"]) == 1
+        assert mock_http.get.call_count == 1
+    @pytest.mark.integration
+    @patch("pyzm.serve.app.http_requests")
+    def test_detect_urls_confidence_filter(self, mock_http, client):
+        """Detections below min_confidence are filtered out."""
+        jpeg_bytes = self._make_jpeg_bytes()
+        ok_resp = MagicMock()
+        ok_resp.content = jpeg_bytes
+        ok_resp.status_code = 200
+        ok_resp.raise_for_status = MagicMock()
+        mock_http.get.return_value = ok_resp
+
+        payload = {
+            "urls": [{"frame_id": "1", "url": "http://zm/image?fid=1"}],
+            "min_confidence": 0.99,  # Very high threshold — model won't reach it
+        }
+        resp = client.post("/detect_urls", json=payload)
+        assert resp.status_code == 200
+        results = resp.json()["results"]
+        # All detections should be filtered out
+        for r in results:
+            assert not r.get("labels")

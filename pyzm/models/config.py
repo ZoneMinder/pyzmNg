@@ -449,6 +449,16 @@ class StreamConfig(BaseModel):
     save_frames_dir: str = "/tmp"
     delete_after_analyze: bool = False
     convert_snapshot_to_fid: bool = False
+    stop_on_match: bool = Field(
+        default=True,
+        description=(
+            "When True and operating in remote-gateway URL mode, the gateway stops "
+            "processing frames as soon as it finds a detection that passes all "
+            "server-side filters (confidence, pattern and zone). Set to False to "
+            "process all frames regardless of early matches. "
+            "Only relevant when ml_gateway and ml_gateway_mode=url are set."
+        ),
+    )
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "StreamConfig":
@@ -493,7 +503,7 @@ class StreamConfig(BaseModel):
 
         # Simple bool fields
         for key in (
-            "download", "disable_ssl_cert_check", "save_frames",
+            "download", "disable_ssl_cert_check", "save_frames", "stop_on_match",
             "delete_after_analyze", "convert_snapshot_to_fid",
         ):
             if key in d:
@@ -524,6 +534,24 @@ class ServerConfig(BaseModel):
     auth_password: SecretStr = SecretStr("")
     token_expiry_seconds: int = 3600
     token_secret: str = "change-me"
+    workers: int = Field(
+        default=1,
+        description=(
+            "Number of uvicorn worker processes to spawn. Each worker loads "
+            "the model independently into memory, enabling truly parallel "
+            "inference across simultaneous events. Requires the "
+            "pyzm.serve.app:get_app factory entry point (used automatically "
+            "when workers > 1)."
+        ),
+    )
+    log_level: str = Field(
+        default="info",
+        description=(
+            "Logging level propagated to each worker process. "
+            "Any standard Python logging level name (debug, info, warning, error, critical). "
+            "When --debug is passed on the CLI this is overridden to debug automatically."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_models_all(self) -> "ServerConfig":
