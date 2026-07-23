@@ -1869,3 +1869,51 @@ class TestDetectEventFrameSelection:
         det = self._make_detector()
         det._config.frame_strategy = FrameStrategy.MOST_MODELS
         assert self._forwarded_stop_on_match(mock_requests, det, self._make_zm_client()) is False
+
+
+class TestRemoteBestFrameSelection:
+    """`_remote_detect_urls` must pick the best frame across multiple gateway
+    frames for the most*/best strategies -- not just forward a flag."""
+
+    def _make_detector(self, strategy):
+        from pyzm.ml.detector import Detector
+        det = Detector.__new__(Detector)
+        det._config = DetectorConfig(pattern=".*")
+        det._config.frame_strategy = strategy
+        det._pipeline = None
+        det._gateway = "http://gpu:5000"
+        det._gateway_mode = "url"
+        det._gateway_token = None
+        det._gateway_timeout = 10
+        det._gateway_username = None
+        det._gateway_password = None
+        return det
+
+    @staticmethod
+    def _frame(fid, labels):
+        from pyzm.models.detection import BBox, Detection, DetectionResult
+        dets = [Detection(l, 0.9, BBox(0, 0, 10, 10), "yolov4") for l in labels]
+        return DetectionResult(
+            detections=dets, frame_id=fid,
+            image_dimensions={"original": (100, 100)},
+        ).to_dict()
+
+    @patch("pyzm.ml.detector.requests")
+    def test_most_strategy_returns_richest_frame(self, mock_requests):
+        from pyzm.models.config import FrameStrategy
+        det = self._make_detector(FrameStrategy.MOST)
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"results": [
+            self._frame("1", ["person"]),
+            self._frame("2", ["person", "dog", "cat"]),   # richest
+            self._frame("3", ["person", "dog"]),
+        ]}
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.post.return_value = mock_resp
+
+        frame_urls = [{"frame_id": str(i), "url": f"http://zm/i?fid={i}"} for i in (1, 2, 3)]
+        result = det._remote_detect_urls(frame_urls, zm_auth="", zones=None)
+
+        assert result.frame_id == "2"
+        assert len(result.detections) == 3
