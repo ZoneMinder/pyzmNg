@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pyzm.models.config import StreamConfig, ZMClientConfig
-from pyzm.models.zm import Event, Monitor, PTZCapabilities, Zone
+from pyzm.models.zm import Event, Monitor, Notification, PTZCapabilities, Zone
 
 
 # ===================================================================
@@ -2130,3 +2130,90 @@ class TestZMClientServersStorage:
         client = ZMClient(api_url="https://zm.example.com/zm/api")
 
         assert client.storage() == []
+
+
+# ===================================================================
+# TestZMClientNotifications -- the untested notification getters
+# ===================================================================
+
+class TestZMClientNotifications:
+    @patch("pyzm.client.ZMAPI")
+    def test_notifications_returns_bound_objects(self, mock_zmapi_cls):
+        mock_api = _make_mock_api()
+        mock_api.get.return_value = {"notifications": [
+            {"Notification": {"Id": "1", "Token": "a", "MonitorList": "2"}},
+            {"Notification": {"Id": "2", "Token": "b"}},
+        ]}
+        mock_zmapi_cls.return_value = mock_api
+
+        from pyzm.client import ZMClient
+        client = ZMClient(api_url="https://zm.example.com/zm/api")
+        notifs = client.notifications()
+
+        mock_api.get.assert_called_with("notifications.json")
+        assert [n.id for n in notifs] == [1, 2]
+        assert all(isinstance(n, Notification) for n in notifs)
+        assert notifs[0]._client is client  # bound so .delete()/.update work
+
+    @patch("pyzm.client.ZMAPI")
+    def test_notifications_empty(self, mock_zmapi_cls):
+        mock_api = _make_mock_api()
+        mock_api.get.return_value = {"notifications": []}
+        mock_zmapi_cls.return_value = mock_api
+
+        from pyzm.client import ZMClient
+        client = ZMClient(api_url="https://zm.example.com/zm/api")
+        assert client.notifications() == []
+
+    @patch("pyzm.client.ZMAPI")
+    def test_notification_by_id(self, mock_zmapi_cls):
+        mock_api = _make_mock_api()
+        mock_api.get.return_value = {"notification": {"Id": "7", "Token": "abc"}}
+        mock_zmapi_cls.return_value = mock_api
+
+        from pyzm.client import ZMClient
+        client = ZMClient(api_url="https://zm.example.com/zm/api")
+        n = client.notification(7)
+        mock_api.get.assert_called_with("notifications/7.json")
+        assert n.id == 7
+
+
+# ===================================================================
+# TestNotFoundNonePath -- single-resource getters must raise "not found"
+# on a 404 (api.get returns None post-#56), not only on an empty {} body.
+# ===================================================================
+
+class TestNotFoundNonePath:
+    def _client(self, mock_zmapi_cls, get):
+        mock_api = _make_mock_api()
+        mock_api.get.side_effect = get if isinstance(get, list) else None
+        if not isinstance(get, list):
+            mock_api.get.return_value = get
+        mock_zmapi_cls.return_value = mock_api
+        from pyzm.client import ZMClient
+        return ZMClient(api_url="https://zm.example.com/zm/api")
+
+    @patch("pyzm.client.ZMAPI")
+    def test_notification_none_raises_not_found(self, mock_zmapi_cls):
+        client = self._client(mock_zmapi_cls, None)
+        with pytest.raises(ValueError, match="not found"):
+            client.notification(999)
+
+    @patch("pyzm.client.ZMAPI")
+    def test_monitor_none_raises_not_found(self, mock_zmapi_cls):
+        # monitors() list empty, then direct lookup 404 -> None
+        client = self._client(mock_zmapi_cls, [{"monitors": []}, None])
+        with pytest.raises(ValueError, match="not found"):
+            client.monitor(999)
+
+    @patch("pyzm.client.ZMAPI")
+    def test_config_none_raises_not_found(self, mock_zmapi_cls):
+        client = self._client(mock_zmapi_cls, None)
+        with pytest.raises(ValueError, match="not found"):
+            client.config("NONEXISTENT")
+
+    @patch("pyzm.client.ZMAPI")
+    def test_control_none_raises_not_found(self, mock_zmapi_cls):
+        client = self._client(mock_zmapi_cls, None)
+        with pytest.raises(ValueError, match="not found"):
+            client._ptz_capabilities(999)
