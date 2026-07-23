@@ -1,3 +1,17 @@
 [build-system]
 requires = ["setuptools<70", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+# --strict-markers: an unregistered/typo'd marker (or skip decorator) is an
+#   error, not a silent no-op -- so a test can't accidentally never run.
+# --strict-config: typos in this section fail loudly.
+# filterwarnings=error: warnings from our own code become failures; the two
+#   ignores are resource-cleanup noise from ML libs / subprocess e2e only.
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+filterwarnings = [
+    "error",
+    "ignore::ResourceWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]

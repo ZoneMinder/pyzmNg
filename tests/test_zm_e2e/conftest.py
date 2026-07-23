@@ -74,7 +74,18 @@ _ZM_API_URL = _get("ZM_API_URL")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Auto-skip zm_e2e tests when the ZM server isn't configured."""
+    """Auto-skip zm_e2e tests when the ZM server isn't configured.
+
+    When PYZM_E2E_REQUIRE=1 (used by ``make release-gate``), an unconfigured
+    server is a hard failure instead of a silent skip -- otherwise a runner
+    that never reached the live server would still report green.
+    """
+    if _get("PYZM_E2E_REQUIRE") == "1" and not _ZM_API_URL:
+        raise pytest.UsageError(
+            "PYZM_E2E_REQUIRE=1 but ZM_API_URL is not set (no .env.zm_e2e). "
+            "Configure the live ZoneMinder server or unset PYZM_E2E_REQUIRE."
+        )
+
     skip_no_server = pytest.mark.skip(reason="ZM_API_URL not set (no .env.zm_e2e)")
     skip_no_write = pytest.mark.skip(reason="ZM_E2E_WRITE != 1 (write tests disabled)")
     write_enabled = _get("ZM_E2E_WRITE") == "1"
