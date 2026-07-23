@@ -1163,6 +1163,20 @@ class TestZMClientEvents:
         with pytest.raises(ValueError, match="not found"):
             client.event(99999)
 
+    @patch("pyzm.client.ZMAPI")
+    def test_event_404_returns_none_raises_not_found(self, mock_zmapi_cls):
+        """A 404 (api.get returns None, e.g. a deleted event) surfaces as a
+        descriptive 'not found', not BAD_IMAGE. Regression for #56."""
+        mock_api = _make_mock_api()
+        mock_api.get.return_value = None
+        mock_zmapi_cls.return_value = mock_api
+
+        from pyzm.client import ZMClient
+        client = ZMClient(api_url="https://zm.example.com/zm/api")
+
+        with pytest.raises(ValueError, match="not found"):
+            client.event(233090)
+
 
 # ===================================================================
 # TestEvent - OOP methods

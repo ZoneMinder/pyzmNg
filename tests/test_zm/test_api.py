@@ -281,6 +281,21 @@ class TestZMAPIRequest:
         with pytest.raises(ValueError, match="BAD_IMAGE"):
             api.request("https://zm.example.com/zm/index.php?view=image&eid=1")
 
+    def test_404_on_json_endpoint_returns_none(self):
+        """A 404 on a .json API endpoint returns None (not BAD_IMAGE), so
+        callers can raise their own descriptive 'not found' error."""
+        api, session, auth = self._make_api()
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        http_error = requests.HTTPError(response=mock_resp)
+        mock_resp.raise_for_status.side_effect = http_error
+        session.get.return_value = mock_resp
+
+        # query params after .json must not defeat the check
+        result = api.request("https://zm.example.com/zm/api/events/5.json?token=x")
+        assert result is None
+
     def test_bad_image_zero_content_length(self):
         api, session, auth = self._make_api()
 
