@@ -1,0 +1,18 @@
+#!/bin/sh
+# pyzm pre-push gate. Blocks a push when the Tier-1 suite is red.
+# Install once with: make hooks   (sets core.hooksPath -> .githooks)
+#
+# Tier-1 only (unit + integration, ~20s, no models/GPU/live-ZM). The full
+# e2e gate is `make release-gate`, run before cutting a release on a box
+# that has models and a live ZoneMinder.
+#
+# Escape hatch for a genuine emergency: git push --no-verify
+
+echo "pre-push: running Tier-1 test gate (make gate)..."
+if ! make gate; then
+	echo
+	echo "pre-push: BLOCKED -- Tier-1 tests failed. Fix them, or push with --no-verify to override."
+	exit 1
+fi
+echo "pre-push: gate green."
+exit 0

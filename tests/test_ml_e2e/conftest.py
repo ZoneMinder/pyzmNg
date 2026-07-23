@@ -39,7 +39,25 @@ REPO_ROOT = str(Path(__file__).resolve().parents[2])
 # ---------------------------------------------------------------------------
 
 def pytest_collection_modifyitems(config, items):
-    """Skip e2e tests if models or image are missing."""
+    """Skip e2e tests if models or image are missing.
+
+    When PYZM_E2E_REQUIRE=1 (used by ``make release-gate``), a missing
+    prerequisite is a hard failure instead of a silent skip -- otherwise a
+    runner that never ran e2e would still report green.
+    """
+    require = os.environ.get("PYZM_E2E_REQUIRE") == "1"
+    missing = []
+    if not os.path.isdir(BASE_PATH):
+        missing.append(f"model base path {BASE_PATH}")
+    if not os.path.isfile(BIRD_IMAGE):
+        missing.append(f"test image {BIRD_IMAGE}")
+    if missing and require:
+        raise pytest.UsageError(
+            "PYZM_E2E_REQUIRE=1 but ML e2e prerequisites are missing: "
+            + "; ".join(missing)
+            + ". Provide them or unset PYZM_E2E_REQUIRE."
+        )
+
     skip_models = pytest.mark.skip(reason=f"Model base path {BASE_PATH} not found")
     skip_image = pytest.mark.skip(reason=f"Test image {BIRD_IMAGE} not found")
     for item in items:
