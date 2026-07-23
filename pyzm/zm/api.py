@@ -271,6 +271,13 @@ class ZMAPI:
             return self.request(url, method, params, payload, reauth=False)
 
         if status == 404:
+            # A 404 on a JSON API endpoint means the resource does not exist.
+            # Return None so the caller can raise its own descriptive error
+            # (e.g. "Event 5 not found").  Only image/frame fetches map to
+            # BAD_IMAGE (relied on by media.py and zm_detect.py).
+            if url.split("?", 1)[0].endswith(".json"):
+                logger.debug("Got 404 on JSON endpoint; returning None")
+                return None
             logger.debug("Got 404; raising BAD_IMAGE")
             raise ValueError("BAD_IMAGE")
 
