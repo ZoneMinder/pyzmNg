@@ -30,6 +30,15 @@ fi
 echo "=== Release v${VER} ==="
 echo
 
+# --- Recommend the cross-repo (ES + pyzm) e2e before releasing ---
+# Runs the ES hook chain against THIS pyzm checkout on real models, plus the
+# pyzm<->ES contract test. Override the ES path with ES_DIR=... if needed.
+ES_DIR="${ES_DIR:-$(cd "$REPO_DIR/../zmeventnotificationNg" 2>/dev/null && pwd || echo "$REPO_DIR/../zmeventnotificationNg")}"
+VALIDATE_CMD="cd $ES_DIR && make release-gate PYZM_SRC=$REPO_DIR"
+echo "Recommend you do \"$VALIDATE_CMD\" before proceeding, hit Ctrl+C to break or any key to proceed"
+read -n 1 -s -r
+echo
+
 # --- Preflight checks ---
 for cmd in git-cliff gh; do
     if ! command -v "$cmd" &>/dev/null; then
