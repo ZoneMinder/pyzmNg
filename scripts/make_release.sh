@@ -30,16 +30,6 @@ fi
 echo "=== Release v${VER} ==="
 echo
 
-# --- Recommend the cross-repo (ES + pyzm) e2e before releasing ---
-# Runs the ES hook chain against THIS pyzm checkout on real models, plus the
-# pyzm<->ES contract test. Override the ES path with ES_DIR=... if needed.
-ES_DIR="${ES_DIR:-$(cd "$REPO_DIR/../zmeventnotificationNg" 2>/dev/null && pwd || echo "$REPO_DIR/../zmeventnotificationNg")}"
-# Display paths with ~ instead of $HOME for readability
-VALIDATE_CMD="cd ${ES_DIR/#$HOME/\~} && make release-gate PYZM_SRC=${REPO_DIR/#$HOME/\~}"
-echo "Recommend you do \"$VALIDATE_CMD\" before proceeding, hit Ctrl+C to break or any key to proceed"
-read -n 1 -s -r
-echo
-
 # --- Preflight checks ---
 for cmd in git-cliff gh; do
     if ! command -v "$cmd" &>/dev/null; then
@@ -58,6 +48,27 @@ if [ "$SKIP_PYPI" = false ]; then
     fi
 fi
 export GITHUB_TOKEN=$(gh auth token)
+
+# --- Cross-repo (ES + pyzm) e2e: must pass before releasing ---
+# Runs the ES hook chain against THIS pyzm checkout on real models, plus the
+# pyzm<->ES contract test. Aborts the release on any failure.
+# Overrides: ES_DIR=/path (ES checkout), SKIP_E2E=1 (emergency bypass).
+if [ "${SKIP_E2E:-}" = "1" ]; then
+    echo "WARNING: SKIP_E2E=1 -- skipping cross-repo e2e validation"
+else
+    ES_DIR="${ES_DIR:-$(cd "$REPO_DIR/../zmeventnotificationNg" 2>/dev/null && pwd || echo "$REPO_DIR/../zmeventnotificationNg")}"
+    if [ ! -d "$ES_DIR" ]; then
+        echo "ERROR: ES repo not found at $ES_DIR (set ES_DIR=... or SKIP_E2E=1)"
+        exit 1
+    fi
+    echo "Running cross-repo e2e (ES hook chain vs this pyzm) ..."
+    if ! ( cd "$ES_DIR" && make release-gate PYZM_SRC="$REPO_DIR" ); then
+        echo "ERROR: cross-repo e2e FAILED -- aborting release"
+        exit 1
+    fi
+    echo "Cross-repo e2e passed."
+    echo
+fi
 
 # --- Step 1: Check if tag already exists ---
 if git rev-parse "v${VER}" &>/dev/null; then
