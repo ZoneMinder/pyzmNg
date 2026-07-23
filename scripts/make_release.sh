@@ -54,8 +54,15 @@ export GITHUB_TOKEN=$(gh auth token)
 # pyzm<->ES contract test. Aborts the release on any failure.
 # Overrides: ES_DIR=/path (ES checkout), SKIP_E2E=1 (emergency bypass).
 if [ "${SKIP_E2E:-}" = "1" ]; then
-    echo "WARNING: SKIP_E2E=1 -- skipping cross-repo e2e validation"
+    echo "WARNING: SKIP_E2E=1 -- skipping validation gates"
 else
+    # 1. pyzm's own Tier-1 suite (the cross-repo e2e below does NOT run it).
+    echo "Running pyzm Tier-1 gate ..."
+    if ! make gate; then
+        echo "ERROR: pyzm gate FAILED -- aborting release"
+        exit 1
+    fi
+    # 2. Cross-repo e2e (ES hook chain vs this pyzm + contract test).
     ES_DIR="${ES_DIR:-$(cd "$REPO_DIR/../zmeventnotificationNg" 2>/dev/null && pwd || echo "$REPO_DIR/../zmeventnotificationNg")}"
     if [ ! -d "$ES_DIR" ]; then
         echo "ERROR: ES repo not found at $ES_DIR (set ES_DIR=... or SKIP_E2E=1)"
@@ -86,14 +93,14 @@ if git rev-parse "v${VER}" &>/dev/null; then
             echo "  Deleting old release and tag v${VER} ..."
             gh release delete "v${VER}" --repo "$GH_REPO" --yes 2>/dev/null || true
             git tag -d "v${VER}"
-            git push origin --delete "v${VER}" 2>/dev/null || true
+            git push --no-verify origin --delete "v${VER}" 2>/dev/null || true
             ;;
         2)
             echo "  Bumping version: v${VER} -> v${BUMPED_VER} ..."
             sed -i "s/^__version__ = [\"']${VER}[\"']/__version__ = \"${BUMPED_VER}\"/" "$INIT_FILE"
             git add "$INIT_FILE"
             git commit -m "chore: bump version to v${BUMPED_VER}"
-            git push origin "$(git rev-parse --abbrev-ref HEAD)"
+            git push --no-verify origin "$(git rev-parse --abbrev-ref HEAD)"
             VER="$BUMPED_VER"
             echo "  Done. Continuing with v${VER}."
             ;;
@@ -118,7 +125,7 @@ if [ -n "$DIRTY_FILES" ]; then
     echo "Committing ${INIT_FILE} (version bump) ..."
     git add "$INIT_FILE"
     git commit -m "chore: bump version to v${VER}"
-    git push origin master
+    git push --no-verify origin master
     echo "  Done."
     echo
 fi
@@ -153,14 +160,14 @@ echo "  Done."
 echo "Committing CHANGELOG.md ..."
 git add CHANGELOG.md
 git commit -m "docs: update CHANGELOG for v${VER}"
-git push origin master
+git push --no-verify origin master
 echo "  Done."
 echo
 
 # --- Step 4: Tag ---
 echo "Creating tag v${VER} ..."
 git tag -a "v${VER}" -m "v${VER}"
-git push origin --tags
+git push --no-verify origin --tags
 echo "  Done."
 echo
 
