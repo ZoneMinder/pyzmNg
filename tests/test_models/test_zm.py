@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
-from pyzm.models.zm import Event, Frame, Monitor, MonitorStatus, PTZCapabilities, Zone
+from pyzm.models.zm import (
+    Event,
+    Frame,
+    Monitor,
+    MonitorStatus,
+    Notification,
+    PTZCapabilities,
+    Zone,
+)
 
 
 # ===================================================================
@@ -485,3 +493,83 @@ class TestRaw:
         m1 = Monitor(id=1, name="Test", _raw={"Monitor": {"Id": "1"}})
         m2 = Monitor(id=1, name="Test", _raw={"different": "data"})
         assert m1 == m2
+
+
+# ===================================================================
+# TestNotification -- push-token registration logic
+# ===================================================================
+
+class TestNotification:
+    """Real logic for should_notify / is_throttled / monitors parsing.
+
+    These drive whether a push token actually fires in production; before
+    these tests the whole subsystem had zero coverage.
+    """
+
+    # -- monitors() -----------------------------------------------------
+
+    def test_monitors_none_when_list_empty(self):
+        assert Notification(id=1, monitor_list=None).monitors() is None
+        assert Notification(id=1, monitor_list="").monitors() is None
+
+    def test_monitors_parses_csv_to_ints(self):
+        assert Notification(id=1, monitor_list="1,2,7").monitors() == [1, 2, 7]
+
+    def test_monitors_tolerates_whitespace_and_blanks(self):
+        assert Notification(id=1, monitor_list=" 3 , ,5 ").monitors() == [3, 5]
+
+    # -- should_notify() ------------------------------------------------
+
+    def test_should_notify_false_when_not_enabled(self):
+        n = Notification(id=1, push_state="disabled", monitor_list=None)
+        assert n.should_notify(2) is False
+
+    def test_should_notify_true_for_all_monitors_when_list_empty(self):
+        n = Notification(id=1, push_state="enabled", monitor_list=None)
+        assert n.should_notify(999) is True
+
+    def test_should_notify_respects_monitor_membership(self):
+        n = Notification(id=1, push_state="enabled", monitor_list="2,5")
+        assert n.should_notify(2) is True
+        assert n.should_notify(3) is False
+
+    # -- is_throttled() -------------------------------------------------
+
+    def test_not_throttled_when_interval_zero(self):
+        n = Notification(id=1, interval=0, last_notified_at=datetime.now())
+        assert n.is_throttled() is False
+
+    def test_not_throttled_when_never_sent(self):
+        n = Notification(id=1, interval=600, last_notified_at=None)
+        assert n.is_throttled() is False
+
+    def test_throttled_within_interval(self):
+        # sent 100s ago, interval 1000s -> still throttled
+        n = Notification(
+            id=1, interval=1000,
+            last_notified_at=datetime.now() - timedelta(seconds=100),
+        )
+        assert n.is_throttled() is True
+
+    def test_not_throttled_after_interval(self):
+        # sent 100s ago, interval 10s -> interval elapsed, not throttled
+        n = Notification(
+            id=1, interval=10,
+            last_notified_at=datetime.now() - timedelta(seconds=100),
+        )
+        assert n.is_throttled() is False
+
+    # -- from_api_dict() ------------------------------------------------
+
+    def test_from_api_dict_parses_fields(self):
+        n = Notification.from_api_dict({"Notification": {
+            "Id": "7", "UserId": "3", "Token": "abc", "Platform": "ios",
+            "MonitorList": "1,2", "Interval": "300", "PushState": "enabled",
+            "BadgeCount": "4",
+        }})
+        assert n.id == 7
+        assert n.user_id == 3
+        assert n.token == "abc"
+        assert n.monitors() == [1, 2]
+        assert n.interval == 300
+        assert n.badge_count == 4
