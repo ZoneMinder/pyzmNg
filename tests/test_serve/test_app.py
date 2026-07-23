@@ -15,22 +15,32 @@ from pyzm.models.detection import BBox, Detection, DetectionResult
 # ---------------------------------------------------------------------------
 
 def _mock_detector():
-    """Return a mock Detector whose detect() returns a canned result."""
+    """Return a mock Detector whose detect() returns a canned result.
+
+    detect() uses side_effect (not return_value) so every call gets a FRESH
+    DetectionResult. The server mutates result.detections in place (confidence
+    and pattern filters); a shared return_value would leak those mutations
+    across frames within a single request, unlike the real Detector.
+    """
     det = MagicMock()
     det._pipeline = True  # so /health reports models_loaded=True
     det._config = MagicMock()
     det._config.models = [MagicMock()]
-    det.detect.return_value = DetectionResult(
-        detections=[
-            Detection(
-                label="person",
-                confidence=0.95,
-                bbox=BBox(10, 20, 50, 80),
-                model_name="yolov4",
-            )
-        ],
-        frame_id="single",
-    )
+
+    def _fresh_result(*_args, **_kwargs):
+        return DetectionResult(
+            detections=[
+                Detection(
+                    label="person",
+                    confidence=0.95,
+                    bbox=BBox(10, 20, 50, 80),
+                    model_name="yolov4",
+                )
+            ],
+            frame_id="single",
+        )
+
+    det.detect.side_effect = _fresh_result
     return det
 
 
