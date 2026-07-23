@@ -3,7 +3,44 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.4.0] - 2026-07-23
+
+### Bug Fixes
+
+- return None on 404 for JSON endpoints instead of BAD_IMAGE ([fb48632](https://github.com/ZoneMinder/pyzmNg/commit/fb48632bb713fab8f2728743f3f47e6e8a145eec))
+- correct multi-worker auth, guard stop_on_match, docs ([2699097](https://github.com/ZoneMinder/pyzmNg/commit/2699097639d09654b87905c3e520178714838400))
+- address review feedback before merge ([6b23851](https://github.com/ZoneMinder/pyzmNg/commit/6b23851256957826acad77824c91cbc12cce85b1))
+- retry transient connection drops instead of crashing ([563584f](https://github.com/ZoneMinder/pyzmNg/commit/563584fdbaf1d45ea13685f8a30af9ee6d38cfb5))
+
+### Features
+
+- remote gateway URL mode improvements ([0b0c3ea](https://github.com/ZoneMinder/pyzmNg/commit/0b0c3eaa6b80eb878e6735f6f4bde51318ee1db6))
+
+### Miscellaneous
+
+- auto-run cross-repo ES+pyzm e2e, abort on failure ([66e3e16](https://github.com/ZoneMinder/pyzmNg/commit/66e3e161042d26e0b03606bd2f8e886f67f81867))
+- show ~ instead of $HOME in the validation prompt ([8180377](https://github.com/ZoneMinder/pyzmNg/commit/8180377e206f8993195a0fd54bb5073ccff2274e))
+- prompt for cross-repo ES+pyzm e2e before releasing ([e9309f5](https://github.com/ZoneMinder/pyzmNg/commit/e9309f572c3f8e753fef03ff1466ec890643a077))
+- bump version to v2.4.0 ([323c45f](https://github.com/ZoneMinder/pyzmNg/commit/323c45f2495bf028dcbbccdf869a39ae03ef5c31))
+- add local pre-push test gate, strict pytest, e2e-require ([eb91009](https://github.com/ZoneMinder/pyzmNg/commit/eb91009cada5858add9c2124278eef6b8bdb65cf))
+
+### Testing
+
+- assert a positive detection instead of isinstance(list) ([3508680](https://github.com/ZoneMinder/pyzmNg/commit/350868033bf373ad07eb97ee729d66ef9959bce3))
+- return a fresh DetectionResult per detect() call ([3538bcf](https://github.com/ZoneMinder/pyzmNg/commit/3538bcf2febb435221cfa7420627e3097d2f5ccc))
+- cover best-frame selection across gateway frames ([edf1226](https://github.com/ZoneMinder/pyzmNg/commit/edf122662b68a62105a91ed16973b104e17abfc0))
+- cover pattern filter and 404-retry branch ([71a5972](https://github.com/ZoneMinder/pyzmNg/commit/71a59720b522a89d00416c15065faae3bfeabcb6))
+- cover notification getters + [#56](https://github.com/ZoneMinder/pyzmNg/issues/56) None-path for getters ([3a6bba3](https://github.com/ZoneMinder/pyzmNg/commit/3a6bba30398d7a18dcbc1ba0604bfd5c3e2572ff))
+- cover Notification should_notify/is_throttled/monitors ([fc5f664](https://github.com/ZoneMinder/pyzmNg/commit/fc5f664513c14f731f2dba941c1121451363883b))
+- lock DetectionResult wire contract (ES boundary) ([1a8cb14](https://github.com/ZoneMinder/pyzmNg/commit/1a8cb14df03ca58369e1b9005c9c5cf97c2a60bd))
+- remove hardcoded /home path from serve subprocess launch ([0e8e275](https://github.com/ZoneMinder/pyzmNg/commit/0e8e2756d276773d9daf747efba76c5276ab0a59))
+- lock idempotent-only retry contract; fix PUT comment ([#51](https://github.com/ZoneMinder/pyzmNg/issues/51)) ([6b21aa6](https://github.com/ZoneMinder/pyzmNg/commit/6b21aa6e8c5630398709400151e6d85f36c1453c))
+
 ## [2.3.8] - 2026-07-19
+
+### Documentation
+
+- update CHANGELOG for v2.3.8 ([1b67233](https://github.com/ZoneMinder/pyzmNg/commit/1b67233c21abb0e19bb4521566c8473527d1d839))
 
 ### Features
 
