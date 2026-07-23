@@ -25,7 +25,13 @@ import pytest
 # ---------------------------------------------------------------------------
 
 BIRD_IMAGE = str(Path(__file__).parent / "bird.jpg")
-BASE_PATH = "/var/lib/zmeventnotification/models"
+BASE_PATH = os.environ.get(
+    "PYZM_E2E_MODELS", "/var/lib/zmeventnotification/models"
+)
+# Repo root (…/tests/test_ml_e2e/conftest.py -> parents[2]); used as the cwd
+# and PYTHONPATH for the server subprocess so the working-tree copy of pyzm
+# is authoritative regardless of where the repo is checked out.
+REPO_ROOT = str(Path(__file__).resolve().parents[2])
 
 
 # ---------------------------------------------------------------------------
@@ -99,8 +105,8 @@ def start_serve(models, port, extra_args=None):
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        cwd="/home/arjunrc/fiddle/pyzm",
-        env={**os.environ, "PYTHONPATH": "/home/arjunrc/fiddle/pyzm"},
+        cwd=REPO_ROOT,
+        env={**os.environ, "PYTHONPATH": REPO_ROOT},
     )
 
 
