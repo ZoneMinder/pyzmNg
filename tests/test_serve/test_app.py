@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -15,22 +15,32 @@ from pyzm.models.detection import BBox, Detection, DetectionResult
 # ---------------------------------------------------------------------------
 
 def _mock_detector():
-    """Return a mock Detector whose detect() returns a canned result."""
+    """Return a mock Detector whose detect() returns a canned result.
+
+    detect() uses side_effect (not return_value) so every call gets a FRESH
+    DetectionResult. The server mutates result.detections in place (confidence
+    and pattern filters); a shared return_value would leak those mutations
+    across frames within a single request, unlike the real Detector.
+    """
     det = MagicMock()
     det._pipeline = True  # so /health reports models_loaded=True
     det._config = MagicMock()
     det._config.models = [MagicMock()]
-    det.detect.return_value = DetectionResult(
-        detections=[
-            Detection(
-                label="person",
-                confidence=0.95,
-                bbox=BBox(10, 20, 50, 80),
-                model_name="yolov4",
-            )
-        ],
-        frame_id="single",
-    )
+
+    def _fresh_result(*_args, **_kwargs):
+        return DetectionResult(
+            detections=[
+                Detection(
+                    label="person",
+                    confidence=0.95,
+                    bbox=BBox(10, 20, 50, 80),
+                    model_name="yolov4",
+                )
+            ],
+            frame_id="single",
+        )
+
+    det.detect.side_effect = _fresh_result
     return det
 
 
@@ -406,3 +416,75 @@ class TestDetectUrls:
         # All detections should be filtered out
         for r in results:
             assert not r.get("labels")
+
+    @pytest.mark.integration
+    @patch("pyzm.serve.app.http_requests")
+    def test_detect_urls_pattern_filter_drops_nonmatching(self, mock_http, client):
+        """Server-side pattern filter drops labels not matching the client regex."""
+        jpeg_bytes = self._make_jpeg_bytes()
+        ok_resp = MagicMock()
+        ok_resp.content = jpeg_bytes
+        ok_resp.status_code = 200
+        ok_resp.raise_for_status = MagicMock()
+        mock_http.get.return_value = ok_resp
+
+        payload = {
+            "urls": [{"frame_id": "1", "url": "http://zm/image?fid=1"}],
+            "pattern": "(car)",  # mock detector returns 'person' -> must be dropped
+            "stop_on_match": False,
+        }
+        resp = client.post("/detect_urls", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["results"][0]["labels"] == []
+
+    @pytest.mark.integration
+    @patch("pyzm.serve.app.http_requests")
+    def test_detect_urls_pattern_filter_keeps_matching(self, mock_http, client):
+        """A matching pattern keeps the detection (guards against over-filtering)."""
+        jpeg_bytes = self._make_jpeg_bytes()
+        ok_resp = MagicMock()
+        ok_resp.content = jpeg_bytes
+        ok_resp.status_code = 200
+        ok_resp.raise_for_status = MagicMock()
+        mock_http.get.return_value = ok_resp
+
+        payload = {
+            "urls": [{"frame_id": "1", "url": "http://zm/image?fid=1"}],
+            "pattern": "(person)",
+            "stop_on_match": False,
+        }
+        resp = client.post("/detect_urls", json=payload)
+        assert resp.json()["results"][0]["labels"] == ["person"]
+
+    @pytest.mark.integration
+    @patch("pyzm.serve.app.asyncio.sleep", new_callable=AsyncMock)
+    @patch("pyzm.serve.app.http_requests")
+    def test_detect_urls_retries_404_then_succeeds(self, mock_http, mock_sleep, client):
+        """A frame that 404s then appears on retry is fetched and analyzed.
+
+        Exercises the max_attempts>1 branch (dead code under the existing
+        tests, which all use max_attempts=1): the retry loop, the sleep, and
+        the resp=resp2 reassignment.
+        """
+        jpeg_bytes = self._make_jpeg_bytes()
+        not_found = MagicMock()
+        not_found.status_code = 404
+        ok_resp = MagicMock()
+        ok_resp.content = jpeg_bytes
+        ok_resp.status_code = 200
+        ok_resp.raise_for_status = MagicMock()
+        # initial 404, retry #2 404, retry #3 succeeds
+        mock_http.get.side_effect = [not_found, not_found, ok_resp]
+
+        payload = {
+            "urls": [{"frame_id": "5", "url": "http://zm/image?fid=5"}],
+            "max_attempts": 3,
+            "sleep_between_attempts": 0,
+            "stop_on_match": False,
+        }
+        resp = client.post("/detect_urls", json=payload)
+        assert resp.status_code == 200
+        results = resp.json()["results"]
+        assert mock_http.get.call_count == 3          # initial + 2 retries
+        assert mock_sleep.await_count == 2            # slept before each retry
+        assert results and results[0]["labels"] == ["person"]  # retried frame analyzed
