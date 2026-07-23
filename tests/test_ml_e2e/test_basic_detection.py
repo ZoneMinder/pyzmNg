@@ -14,7 +14,11 @@ class TestBasicDetection:
         result = det.detect(BIRD_IMAGE)
         assert result is not None
         assert result.frame_id == "single"
-        assert isinstance(result.labels, list)
+        # bird.jpg contains a clear subject; a real model must detect something.
+        # Model-agnostic (label varies by model), but a total-detection
+        # regression (backend returns []) fails here instead of passing green.
+        assert result.matched, "expected at least one detection on bird.jpg"
+        assert len(result.labels) == len(result.confidences) == len(result.boxes)
 
     def test_detect_from_numpy_array(self):
         from pyzm.ml.detector import Detector
@@ -23,7 +27,7 @@ class TestBasicDetection:
         image = load_image()
         result = det.detect(image)
         assert result is not None
-        assert isinstance(result.labels, list)
+        assert result.matched, "expected at least one detection on bird.jpg"
 
     def test_detect_multi_frame(self):
         from pyzm.ml.detector import Detector
@@ -40,6 +44,7 @@ class TestBasicDetection:
         model = find_one_model()
         det = Detector(models=[model], base_path=BASE_PATH, processor="cpu")
         result = det.detect(BIRD_IMAGE)
+        assert result.matched, "expected at least one detection on bird.jpg"
         assert isinstance(result.labels, list)
         assert isinstance(result.confidences, list)
         assert isinstance(result.boxes, list)
