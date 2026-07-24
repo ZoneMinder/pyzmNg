@@ -66,7 +66,7 @@ else
     # PYZM_E2E_REQUIRE=1 => missing models FAIL instead of silently skipping,
     # so a green release proves remote detection matches local on a real model.
     echo "Running real-model remote parity e2e ..."
-    if ! PYZM_E2E_REQUIRE=1 python3 -m pytest tests/test_ml_e2e/test_remote_serve.py -m serve -q; then
+    if ! PYZM_E2E_REQUIRE=1 python3 -m pytest tests/test_ml_e2e/test_remote_serve.py -m serve -v; then
         echo "ERROR: remote parity e2e FAILED -- aborting release"
         exit 1
     fi

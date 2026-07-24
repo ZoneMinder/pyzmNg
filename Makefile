@@ -25,7 +25,7 @@ gate:
 # Pre-release gate. PYZM_E2E_REQUIRE=1 turns "prereq missing" from a silent
 # skip into a hard failure, so a green release-gate proves e2e actually ran.
 release-gate: gate
-	PYZM_E2E_REQUIRE=1 $(PYTEST) tests/test_ml_e2e/ tests/test_zm_e2e/ -q
+	PYZM_E2E_REQUIRE=1 $(PYTEST) tests/test_ml_e2e/ tests/test_zm_e2e/ -v
 
 test:
 	$(PYTEST) tests/ -q
