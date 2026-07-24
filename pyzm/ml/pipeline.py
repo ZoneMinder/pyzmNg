@@ -73,6 +73,20 @@ def _create_backend(model_config: ModelConfig) -> MLBackend:
     raise ValueError(f"Unknown model framework: {fw}")
 
 
+# Frameworks whose inference is compute-heavy and can be offloaded to a remote
+# gateway. Cloud/API backends (plate_recognizer, openalpr, aws_rekognition) and
+# audio (birdnet) stay client-side: they are network calls or need local data,
+# so remoting them adds no benefit and would leak API keys to the gateway.
+REMOTE_CAPABLE_FRAMEWORKS = frozenset({
+    ModelFramework.OPENCV,
+    ModelFramework.HOG,
+    ModelFramework.VIRELAI,
+    ModelFramework.CORAL,
+    ModelFramework.FACE_DLIB,
+    ModelFramework.FACE_TPU,
+})
+
+
 # ---------------------------------------------------------------------------
 # ModelPipeline
 # ---------------------------------------------------------------------------
@@ -89,8 +103,9 @@ class ModelPipeline:
     4. Runs zone, size, and pattern filters on the combined results.
     """
 
-    def __init__(self, detector_config: DetectorConfig) -> None:
+    def __init__(self, detector_config: DetectorConfig, gateway_client=None) -> None:
         self._config = detector_config
+        self._gateway_client = gateway_client
         self._backends: list[tuple[ModelConfig, MLBackend]] = []
         self._loaded = False
 
@@ -115,6 +130,13 @@ class ModelPipeline:
 
     # -- public API -----------------------------------------------------------
 
+    def _make_backend(self, mc: ModelConfig) -> MLBackend:
+        """Create a backend for *mc*, routing remote-capable models to the gateway."""
+        if self._gateway_client is not None and mc.framework in REMOTE_CAPABLE_FRAMEWORKS:
+            from pyzm.ml.remote import RemoteInferenceBackend
+            return RemoteInferenceBackend(mc, self._gateway_client)
+        return _create_backend(mc)
+
     def load(self) -> None:
         """Pre-load all enabled backends."""
         if self._loaded:
@@ -124,7 +146,7 @@ class ModelPipeline:
                 logger.debug("Skipping disabled model: %s", mc.name or mc.framework)
                 continue
             try:
-                backend = _create_backend(mc)
+                backend = self._make_backend(mc)
                 backend.load()
                 self._backends.append((mc, backend))
             except Exception:
@@ -144,7 +166,7 @@ class ModelPipeline:
             if not mc.enabled:
                 continue
             try:
-                backend = _create_backend(mc)
+                backend = self._make_backend(mc)
                 # Don't call backend.load() — weights load on first detect()
                 self._backends.append((mc, backend))
             except Exception:
@@ -310,7 +332,13 @@ class ModelPipeline:
                     logger.debug("%s: %d detections [%s]", backend.name, len(raw), det_summary)
                 else:
                     logger.debug("%s: no detections", backend.name)
-            except Exception:
+            except Exception as exc:
+                # A gateway transport failure must bubble up so the caller can
+                # fall back to local detection (ml_fallback_local); a per-model
+                # error is logged and skipped like a local load failure.
+                from pyzm.ml.remote import GatewayUnreachable
+                if isinstance(exc, GatewayUnreachable):
+                    raise
                 logger.exception("Error running %s", backend.name)
                 continue
 

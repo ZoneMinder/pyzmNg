@@ -1,0 +1,129 @@
+"""Remote inference: client-side glue for the dumb pyzm.serve gateway.
+
+The gateway is a pure inference engine: given one image + one model reference it
+runs that model and returns raw detections. All orchestration (model sequence,
+pre_existing_labels gating, pattern/zone/size/past filtering, frame strategy)
+stays on the client, inside :class:`~pyzm.ml.pipeline.ModelPipeline`.
+
+:class:`RemoteInferenceBackend` implements the :class:`MLBackend` interface, so
+the pipeline treats a remotely-served model exactly like a local one -- which is
+what makes local and remote produce identical results (structural parity).
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+import requests
+
+from pyzm.ml.backends.base import MLBackend
+from pyzm.models.detection import BBox, Detection
+
+if TYPE_CHECKING:
+    import numpy as np
+
+    from pyzm.models.config import ModelConfig
+
+logger = logging.getLogger("pyzm.ml")
+
+
+class GatewayUnreachable(Exception):
+    """The gateway could not be reached (connection/timeout/HTTP error).
+
+    Raised for *transport* failures so the pipeline lets it propagate to the
+    event-level fallback (ml_fallback_local) instead of swallowing it as a
+    per-model "no detections". A per-model gateway error (unknown model on the
+    server) is a plain RuntimeError -- swallowed and skipped like a local model
+    that fails to load.
+    """
+
+
+class GatewayClient:
+    """Talks to a remote pyzm.serve gateway: auth + single-model inference."""
+
+    def __init__(
+        self,
+        url: str,
+        username: str | None = None,
+        password: str | None = None,
+        timeout: int = 60,
+    ) -> None:
+        self.url = url.rstrip("/")
+        self._username = username
+        self._password = password
+        self._timeout = timeout
+        self._token: str | None = None
+
+    def _auth_headers(self) -> dict[str, str]:
+        if self._token:
+            return {"Authorization": f"Bearer {self._token}"}
+        if not self._username:
+            return {}
+        resp = requests.post(
+            f"{self.url}/login",
+            json={"username": self._username, "password": self._password or ""},
+            timeout=self._timeout,
+        )
+        resp.raise_for_status()
+        self._token = resp.json().get("access_token")
+        return {"Authorization": f"Bearer {self._token}"} if self._token else {}
+
+    def infer(self, image: "np.ndarray", mtype: str, name: str) -> list[Detection]:
+        """Run one model on one image on the gateway, return raw detections."""
+        import cv2  # lazy
+
+        # PNG (lossless) so the gateway runs inference on pixels identical to the
+        # local path -> exact local<->remote parity. JPEG would recompress and
+        # shift detections by a few pixels.
+        ok, buf = cv2.imencode(".png", image)
+        if not ok:
+            raise ValueError("Failed to encode frame for remote inference")
+        try:
+            resp = requests.post(
+                f"{self.url}/infer",
+                files={"image": ("frame.png", buf.tobytes(), "image/png")},
+                data={"type": mtype, "name": name or ""},
+                headers=self._auth_headers(),
+                timeout=self._timeout,
+            )
+            resp.raise_for_status()
+        except requests.RequestException as exc:  # connect/timeout/HTTP error
+            raise GatewayUnreachable(str(exc)) from exc
+        payload = resp.json()
+        if payload.get("error"):
+            raise RuntimeError(f"Gateway error for {mtype}/{name}: {payload['error']}")
+        return [_detection_from_dict(d, name) for d in payload.get("detections", [])]
+
+
+def _detection_from_dict(d: dict, model_name: str) -> Detection:
+    box = d["box"]
+    return Detection(
+        label=d["label"],
+        confidence=float(d["confidence"]),
+        bbox=BBox(int(box[0]), int(box[1]), int(box[2]), int(box[3])),
+        model_name=d.get("model_name") or model_name,
+        detection_type=d.get("type", "object"),
+    )
+
+
+class RemoteInferenceBackend(MLBackend):
+    """MLBackend proxy that runs a model on the remote gateway instead of locally."""
+
+    def __init__(self, model_config: "ModelConfig", client: GatewayClient) -> None:
+        self._config = model_config
+        self._client = client
+
+    @property
+    def name(self) -> str:
+        return self._config.name or self._config.framework.value
+
+    def load(self) -> None:  # nothing loads locally
+        return None
+
+    @property
+    def is_loaded(self) -> bool:
+        return True
+
+    def detect(self, image: "np.ndarray") -> list[Detection]:
+        return self._client.infer(image, self._config.type.value, self._config.name or "")

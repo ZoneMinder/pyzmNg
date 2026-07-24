@@ -144,6 +144,9 @@ class TestDetectorConfigVariants:
         cfg = DetectorConfig.from_dict(ml)
         m = cfg.models[0]
         assert m.type == ModelType.ALPR
+        # An ALPR sequence without alpr_framework must resolve to the ALPR
+        # backend (from alpr_service), NOT default to opencv/YOLO.
+        assert m.framework == ModelFramework.PLATE_RECOGNIZER
         assert m.alpr_service == "plate_recognizer"
         assert m.alpr_key == "tok_abc"
         # Extended options flow into options dict

@@ -12,15 +12,18 @@ from pyzm.models.detection import BBox, Detection, DetectionResult
 
 def _mock_detector():
     det = MagicMock()
-    det._pipeline = True
     det._config = MagicMock()
     det._config.models = [MagicMock()]
-    det.detect.return_value = DetectionResult(
-        detections=[
-            Detection(label="person", confidence=0.95, bbox=BBox(10, 20, 50, 80), model_name="yolov4")
-        ],
-        frame_id="single",
-    )
+    mc = MagicMock()
+    mc.type.value = "object"
+    mc.name = "yolov4"
+    backend = MagicMock()
+    backend.detect.return_value = [
+        Detection(label="person", confidence=0.95, bbox=BBox(10, 20, 50, 80), model_name="yolov4")
+    ]
+    pipeline = MagicMock()
+    pipeline._backends = [(mc, backend)]
+    det._pipeline = pipeline
     return det
 
 
@@ -72,7 +75,7 @@ class TestAuthProtectedEndpoints:
         import cv2, numpy as np
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         _, buf = cv2.imencode(".jpg", img)
-        resp = auth_client.post("/detect", files={"file": ("t.jpg", buf.tobytes(), "image/jpeg")})
+        resp = auth_client.post("/infer", files={"image": ("t.jpg", buf.tobytes(), "image/jpeg")}, data={"type": "object"})
         assert resp.status_code in (401, 403)
 
     @pytest.mark.integration
@@ -82,12 +85,13 @@ class TestAuthProtectedEndpoints:
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         _, buf = cv2.imencode(".jpg", img)
         resp = auth_client.post(
-            "/detect",
-            files={"file": ("t.jpg", buf.tobytes(), "image/jpeg")},
+            "/infer",
+            files={"image": ("t.jpg", buf.tobytes(), "image/jpeg")},
+            data={"type": "object"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 200
-        assert resp.json()["labels"] == ["person"]
+        assert resp.json()["detections"][0]["label"] == "person"
 
     @pytest.mark.integration
     def test_detect_with_bad_token(self, auth_client):
@@ -95,8 +99,9 @@ class TestAuthProtectedEndpoints:
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         _, buf = cv2.imencode(".jpg", img)
         resp = auth_client.post(
-            "/detect",
-            files={"file": ("t.jpg", buf.tobytes(), "image/jpeg")},
+            "/infer",
+            files={"image": ("t.jpg", buf.tobytes(), "image/jpeg")},
+            data={"type": "object"},
             headers={"Authorization": "Bearer invalid-token-here"},
         )
         assert resp.status_code == 401
@@ -147,7 +152,7 @@ class TestNoAuthLogin:
         import cv2, numpy as np
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         _, buf = cv2.imencode(".jpg", img)
-        resp = noauth_client.post("/detect", files={"file": ("t.jpg", buf.tobytes(), "image/jpeg")})
+        resp = noauth_client.post("/infer", files={"image": ("t.jpg", buf.tobytes(), "image/jpeg")}, data={"type": "object"})
         assert resp.status_code == 200
 
     @pytest.mark.integration
@@ -158,8 +163,9 @@ class TestNoAuthLogin:
         img = np.zeros((100, 100, 3), dtype=np.uint8)
         _, buf = cv2.imencode(".jpg", img)
         resp = noauth_client.post(
-            "/detect",
-            files={"file": ("t.jpg", buf.tobytes(), "image/jpeg")},
+            "/infer",
+            files={"image": ("t.jpg", buf.tobytes(), "image/jpeg")},
+            data={"type": "object"},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 200

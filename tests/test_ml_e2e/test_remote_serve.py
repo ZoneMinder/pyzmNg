@@ -37,13 +37,14 @@ class TestRemoteDetection:
             assert wait_for_serve(port), "Server failed to start"
             with open(BIRD_IMAGE, "rb") as f:
                 r = requests.post(
-                    f"http://127.0.0.1:{port}/detect",
-                    files={"file": ("bird.jpg", f, "image/jpeg")},
+                    f"http://127.0.0.1:{port}/infer",
+                    files={"image": ("bird.jpg", f, "image/jpeg")},
+                    data={"type": "object"},
                 )
             assert r.status_code == 200
             data = r.json()
-            assert "labels" in data
-            assert isinstance(data["labels"], list)
+            assert "detections" in data
+            assert isinstance(data["detections"], list)
         finally:
             stop_serve(proc)
 
@@ -77,8 +78,9 @@ class TestRemoteDetection:
 
             with open(BIRD_IMAGE, "rb") as f:
                 r = requests.post(
-                    f"http://127.0.0.1:{port}/detect",
-                    files={"file": ("bird.jpg", f, "image/jpeg")},
+                    f"http://127.0.0.1:{port}/infer",
+                    files={"image": ("bird.jpg", f, "image/jpeg")},
+                    data={"type": "object"},
                 )
             assert r.status_code == 200
 
@@ -155,8 +157,9 @@ class TestRemoteDetection:
             # Detect with token
             with open(BIRD_IMAGE, "rb") as f:
                 r = requests.post(
-                    f"http://127.0.0.1:{port}/detect",
-                    files={"file": ("bird.jpg", f, "image/jpeg")},
+                    f"http://127.0.0.1:{port}/infer",
+                    files={"image": ("bird.jpg", f, "image/jpeg")},
+                    data={"type": "object"},
                     headers={"Authorization": f"Bearer {token}"},
                 )
             assert r.status_code == 200
@@ -164,8 +167,9 @@ class TestRemoteDetection:
             # Detect without token should fail
             with open(BIRD_IMAGE, "rb") as f:
                 r = requests.post(
-                    f"http://127.0.0.1:{port}/detect",
-                    files={"file": ("bird.jpg", f, "image/jpeg")},
+                    f"http://127.0.0.1:{port}/infer",
+                    files={"image": ("bird.jpg", f, "image/jpeg")},
+                    data={"type": "object"},
                 )
             assert r.status_code in (401, 403)
 
@@ -175,6 +179,29 @@ class TestRemoteDetection:
                 json={"username": "wrong", "password": "wrong"},
             )
             assert r.status_code in (401, 403)
+        finally:
+            stop_serve(proc)
+
+    def test_local_remote_parity(self):
+        """Same image + model + zones must yield identical results local vs remote."""
+        from pyzm.ml.detector import Detector
+        import cv2
+        port = self.PORT + 8
+        model = find_one_model()
+        proc = start_serve([model], port)
+        try:
+            assert wait_for_serve(port), "Server failed to start"
+            img = cv2.imread(BIRD_IMAGE)
+            local = Detector(models=[model], base_path=BASE_PATH)
+            remote = Detector(models=[model], base_path=BASE_PATH,
+                              gateway=f"http://127.0.0.1:{port}")
+            rl = local.detect(img)
+            rr = remote.detect(img)
+            assert rl.labels == rr.labels
+            assert [d.bbox.as_list() for d in rl.detections] == \
+                   [d.bbox.as_list() for d in rr.detections]
+            assert [round(d.confidence, 4) for d in rl.detections] == \
+                   [round(d.confidence, 4) for d in rr.detections]
         finally:
             stop_serve(proc)
 

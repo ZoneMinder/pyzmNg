@@ -32,7 +32,6 @@ from pyzm.models.config import (
     ModelType,
     Processor,
 )
-import requests
 
 from pyzm.ml.filters import filter_by_pattern, filter_by_size, filter_by_zone, filter_past_per_type
 from pyzm.models.detection import DetectionResult
@@ -259,19 +258,26 @@ class Detector:
 
         self._pipeline: ModelPipeline | None = None
 
-        # Remote gateway
+        # Remote gateway (dumb inference server). When set, remote-capable
+        # models run on the gateway via RemoteInferenceBackend; all
+        # orchestration (sequence, gating, filtering, frame strategy) stays
+        # local, so local and remote produce identical results.
+        from pyzm.ml.remote import GatewayClient
         self._gateway = gateway.rstrip("/") if gateway else None
-        self._gateway_mode = gateway_mode
+        self._gateway_mode = gateway_mode  # reserved for URL-mode server-fetch
         self._gateway_timeout = gateway_timeout
         self._gateway_username = gateway_username
         self._gateway_password = gateway_password
-        self._gateway_token: str | None = None
+        self._gw_client = (
+            GatewayClient(self._gateway, gateway_username, gateway_password, gateway_timeout)
+            if self._gateway else None
+        )
 
     # -- private helpers ------------------------------------------------------
 
     def _ensure_pipeline(self, lazy: bool = False) -> ModelPipeline:
         if self._pipeline is None:
-            self._pipeline = ModelPipeline(self._config)
+            self._pipeline = ModelPipeline(self._config, gateway_client=self._gw_client)
             if lazy:
                 self._pipeline.prepare()
             else:
@@ -323,174 +329,6 @@ class Detector:
 
         return detections, error_boxes
 
-    # -- remote gateway helpers -----------------------------------------------
-
-    def _ensure_gateway_token(self) -> str | None:
-        """Authenticate with the remote gateway and cache the token."""
-        if self._gateway_token:
-            return self._gateway_token
-        if not self._gateway_username:
-            return None
-
-        resp = requests.post(
-            f"{self._gateway}/login",
-            json={
-                "username": self._gateway_username,
-                "password": self._gateway_password or "",
-            },
-            timeout=self._gateway_timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        self._gateway_token = data.get("access_token")
-        return self._gateway_token
-
-    def _remote_detect(
-        self,
-        image: "np.ndarray",
-        zones: list["Zone"] | None = None,
-        original_shape: tuple[int, int] | None = None,
-    ) -> DetectionResult:
-        """Send an image to the remote gateway for detection, then filter locally."""
-        import cv2
-
-        _, jpeg = cv2.imencode(".jpg", image)
-        files = {"file": ("image.jpg", jpeg.tobytes(), "image/jpeg")}
-
-        headers: dict[str, str] = {}
-        token = self._ensure_gateway_token()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-
-        resp = requests.post(
-            f"{self._gateway}/detect",
-            files=files,
-            headers=headers,
-            timeout=self._gateway_timeout,
-        )
-        resp.raise_for_status()
-        result = DetectionResult.from_dict(resp.json())
-
-        # Apply client-side filters
-        h, w = image.shape[:2]
-        filtered, error_boxes = self._apply_filters(
-            result.detections, zones, (h, w), original_shape=original_shape,
-        )
-
-        return DetectionResult(
-            detections=filtered,
-            image=image,
-            image_dimensions=result.image_dimensions or {"original": (h, w)},
-            error_boxes=error_boxes,
-        )
-
-    def _remote_detect_urls(
-        self,
-        frame_urls: list[dict[str, str]],
-        zm_auth: str,
-        zones: list["Zone"] | None = None,
-        verify_ssl: bool = True,
-        original_shape: tuple[int, int] | None = None,
-        contig_frames_before_error: int = 5,
-        stop_on_match: bool = True,
-        max_attempts: int = 1,
-        sleep_between_attempts: int = 3,
-        min_confidence: float = 0.3,
-        pattern: str = ".*",
-    ) -> DetectionResult:
-        """Send frame URLs to the remote gateway, apply client-side filtering.
-
-        Parameters
-        ----------
-        contig_frames_before_error:
-            Number of consecutive HTTP 404 responses before the gateway stops
-            processing (maps to stream_sequence.contig_frames_before_error).
-        stop_on_match:
-            When True the gateway stops as soon as one frame produces a
-            detection that passes all server-side filters (confidence, pattern
-            and zone).  Mirrors stream_sequence.stop_on_match.
-        max_attempts:
-            How many times the gateway retries a 404 frame before skipping it.
-            Useful for live events where frames are still being written.
-        sleep_between_attempts:
-            Seconds to wait between retry attempts for a missing frame.
-        min_confidence:
-            Minimum detection confidence forwarded to the gateway for
-            server-side filtering.  Derived from the lowest min_confidence
-            across all enabled models in the pipeline.
-        pattern:
-            Label-match regex forwarded to the gateway (e.g. "(person)").
-            Derived from the shared pattern across enabled models; falls back
-            to ".*" when models have different patterns.
-        """
-        headers: dict[str, str] = {}
-        token = self._ensure_gateway_token()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-
-        payload: dict[str, object] = {
-            "urls": frame_urls,
-            "zm_auth": zm_auth,
-            "verify_ssl": verify_ssl,
-            # Gateway-side behaviour controls
-            "stop_on_match": stop_on_match,
-            "contig_frames_before_error": contig_frames_before_error,
-            "max_attempts": max_attempts,
-            "sleep_between_attempts": sleep_between_attempts,
-            # Server-side filters (applied before stop_on_match check)
-            "min_confidence": min_confidence,
-            "pattern": pattern,
-            # Zone polygons for server-side filtering and short-circuit
-            "zones": [z.as_dict() for z in zones] if zones else [],
-        }
-
-        resp = requests.post(
-            f"{self._gateway}/detect_urls",
-            json=payload,
-            headers=headers,
-            timeout=self._gateway_timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        per_frame = data.get("results", [])
-        if not per_frame:
-            return DetectionResult()
-
-        strategy = self._config.frame_strategy
-        all_results: list[DetectionResult] = []
-
-        for frame_data in per_frame:
-            fid = frame_data.get("frame_id", "")
-            raw_result = DetectionResult.from_dict(frame_data)
-
-            # Use original_shape for filtering if provided, else use image_dimensions from server
-            img_dims = raw_result.image_dimensions or {}
-            shape = original_shape or img_dims.get("original") or (1, 1)
-
-            filtered, error_boxes = self._apply_filters(raw_result.detections, zones, shape)
-
-            result = DetectionResult(
-                detections=filtered,
-                frame_id=fid,
-                image_dimensions=img_dims,
-                error_boxes=error_boxes,
-            )
-            all_results.append(result)
-
-            # Short-circuit for first/first_new
-            if strategy in (FrameStrategy.FIRST, FrameStrategy.FIRST_NEW) and result.matched:
-                return result
-
-        if not all_results:
-            return DetectionResult()
-
-        best = all_results[0]
-        for r in all_results[1:]:
-            if _is_better(r, best, strategy):
-                best = r
-        return best
-
     # -- public API -----------------------------------------------------------
 
     def detect(
@@ -515,21 +353,6 @@ class Detector:
         DetectionResult
         """
         import numpy as np  # lazy
-
-        if self._gateway:
-            # Remote mode: send to gateway
-            if isinstance(input, str):
-                image = self._load_image(input)
-                result = self._remote_detect(image, zones)
-                result.frame_id = "single"
-                return result
-            if isinstance(input, np.ndarray):
-                result = self._remote_detect(input, zones)
-                result.frame_id = "single"
-                return result
-            if isinstance(input, list):
-                return self._detect_multi_frame_remote(input, zones)
-            raise TypeError(f"Unsupported input type: {type(input)}")
 
         pipeline = self._ensure_pipeline()
 
@@ -618,66 +441,6 @@ class Detector:
 
         sc = stream_config or SC()
 
-        # URL mode: send frame URLs to the server instead of fetching frames locally
-        if self._gateway and self._gateway_mode == "url":
-            api = zm_client.api
-
-            portal_url = api.portal_url
-            auth_str = api.auth.get_auth_string()
-            verify_ssl = api.config.verify_ssl
-
-            if sc.frame_set:
-                # Explicit frame_set: use the provided list as-is.
-                # Supports named frames ("snapshot", "alarm") and numeric IDs.
-                frame_ids = sc.frame_set
-            elif sc.max_frames:
-                # Empty frame_set with max_frames configured: use the
-                # start_frame / frame_skip / max_frames sparse-sampling strategy.
-                # This is useful in URL gateway mode to distribute analysis
-                # evenly across a long event without downloading every frame.
-                # Example: start_frame=50, frame_skip=25, max_frames=30
-                #   → frames [50, 75, 100, ..., 775]
-                start = sc.start_frame or 1
-                skip = sc.frame_skip or 1
-                frame_ids = [str(start + i * skip) for i in range(sc.max_frames)]
-            else:
-                # frame_set is empty and max_frames is not configured (0).
-                # The caller has not explicitly chosen a frame-selection strategy,
-                # so fall back to the default behaviour to avoid silently
-                # analysing only a single frame.
-                logger.warning(
-                    "frame_set is empty but max_frames is not configured; "
-                    "falling back to default frame_set ['snapshot', 'alarm', '1']. "
-                    "To use sparse sampling, set max_frames (and optionally "
-                    "start_frame and frame_skip) in stream_sequence."
-                )
-                frame_ids = ["snapshot", "alarm", "1"]
-            frame_urls = [
-                {"frame_id": str(fid), "url": f"{portal_url}/index.php?view=image&eid={event_id}&fid={fid}"}
-                for fid in frame_ids
-            ]
-            # Extract per-model settings to forward to the gateway
-            min_conf = min((mc.min_confidence for mc in self._config.models if mc.enabled), default=0.3)
-            patterns = list({mc.pattern for mc in self._config.models if mc.enabled and mc.pattern})
-            pattern = patterns[0] if len(patterns) == 1 else ".*"
-            # Only let the gateway short-circuit when the frame strategy just
-            # wants the first match. The most*/best strategies must see every
-            # frame to pick the winner, so short-circuiting would silently
-            # degrade them to "first match" instead of "best frame".
-            stop_on_match = sc.stop_on_match and self._config.frame_strategy in (
-                FrameStrategy.FIRST,
-                FrameStrategy.FIRST_NEW,
-            )
-            return self._remote_detect_urls(
-                frame_urls, auth_str, zones, verify_ssl,
-                contig_frames_before_error=sc.contig_frames_before_error,
-                stop_on_match=stop_on_match,
-                max_attempts=sc.max_attempts,
-                sleep_between_attempts=sc.sleep_between_attempts,
-                min_confidence=min_conf,
-                pattern=pattern,
-            )
-
         # Get Event object and extract frames via OOP API
         ev = zm_client.event(event_id)
         result = ev.extract_frames(stream_config=sc)
@@ -693,9 +456,6 @@ class Detector:
         if not frames:
             logger.warning("No frames extracted for event %d", event_id)
             return DetectionResult()
-
-        if self._gateway:
-            return self._detect_multi_frame_remote(frames, zones, original_shape=original_shape)
 
         pipeline = self._ensure_pipeline()
 
@@ -937,41 +697,6 @@ class Detector:
         finally:
             for backend in locked_backends:
                 backend.release_lock()
-
-    def _detect_multi_frame_remote(
-        self,
-        frames: list[tuple[int | str, "np.ndarray"]],
-        zones: list["Zone"] | None,
-        original_shape: tuple[int, int] | None = None,
-    ) -> DetectionResult:
-        """Run remote detection on multiple frames and pick the best result."""
-        strategy = self._config.frame_strategy
-        all_results: list[DetectionResult] = []
-
-        for frame_id, image in frames:
-            try:
-                result = self._remote_detect(image, zones, original_shape=original_shape)
-                result.frame_id = frame_id
-                if original_shape:
-                    result.image_dimensions["original"] = original_shape
-                all_results.append(result)
-            except Exception:
-                logger.exception("Error in remote detection for frame %s", frame_id)
-                continue
-
-            if strategy in (FrameStrategy.FIRST, FrameStrategy.FIRST_NEW) and result.matched:
-                logger.debug("Frame strategy %r: returning frame %s", strategy.value, frame_id)
-                return result
-
-        if not all_results:
-            return DetectionResult()
-
-        best = all_results[0]
-        for result in all_results[1:]:
-            if _is_better(result, best, strategy):
-                best = result
-
-        return best
 
 
 def _is_better(

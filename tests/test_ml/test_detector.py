@@ -665,47 +665,6 @@ class TestDetectorRemoteMode:
         det = Detector.from_dict(ml_options)
         assert det._gateway is None
 
-    @patch("pyzm.ml.detector.Detector._remote_detect")
-    def test_detect_routes_to_remote(self, mock_remote):
-        """When gateway is set, detect() calls _remote_detect."""
-        from pyzm.ml.detector import Detector
-
-        mock_remote.return_value = DetectionResult(detections=[_det("person")])
-        det = Detector(models=["yolov4"], gateway="http://gpu:5000")
-
-        import types
-        mock_np = types.ModuleType("numpy")
-
-        class FakeNdarray:
-            pass
-
-        mock_np.ndarray = FakeNdarray
-        image = MagicMock()
-        image.__class__ = FakeNdarray
-
-        with patch.dict("sys.modules", {"numpy": mock_np}):
-            result = det.detect(image)
-
-        mock_remote.assert_called_once()
-        assert result.frame_id == "single"
-
-    @patch("pyzm.ml.detector.Detector._remote_detect")
-    def test_detect_string_routes_to_remote(self, mock_remote):
-        """When gateway is set, detect(path) loads image locally then remotes."""
-        from pyzm.ml.detector import Detector
-
-        mock_remote.return_value = DetectionResult(detections=[_det("car")])
-        det = Detector(models=["yolov4"], gateway="http://gpu:5000")
-
-        mock_cv2 = MagicMock()
-        mock_image = MagicMock()
-        mock_cv2.imread.return_value = mock_image
-
-        with patch.dict("sys.modules", {"cv2": mock_cv2}):
-            result = det.detect("/path/to/image.jpg")
-
-        mock_remote.assert_called_once()
-        assert result.labels == ["car"]
 
     def test_init_gateway_mode_default(self):
         from pyzm.ml.detector import Detector
@@ -754,127 +713,6 @@ class TestDetectorRemoteMode:
         det = Detector.from_dict(ml_options)
         assert det._gateway_mode == "url"
 
-    @patch("pyzm.ml.detector.Detector._remote_detect_urls")
-    def test_detect_event_url_mode(self, mock_remote_urls):
-        """URL-mode detect_event sends frame URLs instead of fetching frames."""
-        from pyzm.ml.detector import Detector
-
-        mock_remote_urls.return_value = DetectionResult(detections=[_det("person")])
-        det = Detector(models=["yolov4"], gateway="http://gpu:5000", gateway_mode="url")
-
-        # Mock zm_client with api.portal_url and api.auth
-        mock_zm = MagicMock()
-        mock_zm.api.portal_url = "https://zm.example.com/zm"
-        mock_zm.api.auth.get_auth_string.return_value = "token=abc123"
-        mock_zm.api.config.verify_ssl = False
-
-        from pyzm.models.config import StreamConfig
-        sc = StreamConfig(frame_set=["snapshot", "alarm"])
-
-        result = det.detect_event(mock_zm, 12345, stream_config=sc)
-
-        mock_remote_urls.assert_called_once()
-        call_args = mock_remote_urls.call_args
-        frame_urls = call_args[0][0]
-        assert len(frame_urls) == 2
-        assert frame_urls[0]["frame_id"] == "snapshot"
-        assert "eid=12345" in frame_urls[0]["url"]
-        assert "fid=snapshot" in frame_urls[0]["url"]
-        assert frame_urls[1]["frame_id"] == "alarm"
-        assert call_args[0][1] == "token=abc123"  # zm_auth
-        assert call_args[0][3] is False  # verify_ssl
-        assert result.labels == ["person"]
-
-    @patch("pyzm.ml.detector.Detector._remote_detect_urls")
-    def test_detect_event_url_mode_default_frame_set(self, mock_remote_urls):
-        """URL-mode: empty frame_set + no max_frames falls back to [snapshot, alarm, 1]."""
-        from pyzm.ml.detector import Detector
-
-        mock_remote_urls.return_value = DetectionResult()
-        det = Detector(models=["yolov4"], gateway="http://gpu:5000", gateway_mode="url")
-
-        mock_zm = MagicMock()
-        mock_zm.api.portal_url = "https://zm.example.com/zm"
-        mock_zm.api.auth.get_auth_string.return_value = ""
-        mock_zm.api.config.verify_ssl = True
-
-        from pyzm.models.config import StreamConfig
-        sc = StreamConfig(frame_set=[], max_frames=0)
-
-        det.detect_event(mock_zm, 999, stream_config=sc)
-        frame_urls = mock_remote_urls.call_args[0][0]
-        assert len(frame_urls) == 3
-        assert frame_urls[0]["frame_id"] == "snapshot"
-        assert frame_urls[1]["frame_id"] == "alarm"
-        assert frame_urls[2]["frame_id"] == "1"
-
-    def test_detect_event_url_mode_requires_api(self):
-        """URL-mode raises AttributeError if zm_client has no .api."""
-        from pyzm.ml.detector import Detector
-
-        det = Detector(models=["yolov4"], gateway="http://gpu:5000", gateway_mode="url")
-
-        mock_zm = MagicMock(spec=[])  # no attributes
-        with pytest.raises(AttributeError):
-            det.detect_event(mock_zm, 12345)
-
-    @patch("requests.post")
-    def test_remote_detect_urls_sends_post(self, mock_post):
-        """_remote_detect_urls POSTs JSON to /detect_urls."""
-        from pyzm.ml.detector import Detector
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "results": [
-                {
-                    "frame_id": "snapshot",
-                    "labels": ["car"], "boxes": [[10, 20, 50, 80]],
-                    "confidences": [0.9], "model_names": ["yolov4"],
-                    "detection_types": ["object"],
-                    "error_boxes": [],
-                    "image_dimensions": {"original": [100, 100]},
-                },
-            ],
-        }
-        mock_post.return_value = mock_resp
-
-        det = Detector(models=["yolov4"], gateway="http://gpu:5000", gateway_mode="url")
-
-        frame_urls = [{"frame_id": "snapshot", "url": "http://zm/image?eid=1&fid=snapshot"}]
-        result = det._remote_detect_urls(frame_urls, "token=abc", verify_ssl=False)
-
-        mock_post.assert_called_once()
-        call_kwargs = mock_post.call_args
-        assert call_kwargs[0][0] == "http://gpu:5000/detect_urls"
-        payload = call_kwargs[1]["json"]
-        assert payload["urls"] == frame_urls
-        assert payload["zm_auth"] == "token=abc"
-        assert payload["verify_ssl"] is False
-        assert result.labels == ["car"]
-
-    @patch("requests.post")
-    def test_remote_detect_urls_with_auth(self, mock_post):
-        """_remote_detect_urls includes Bearer token when gateway auth is set."""
-        from pyzm.ml.detector import Detector
-
-        # Mock login
-        mock_login_resp = MagicMock()
-        mock_login_resp.json.return_value = {"access_token": "jwt123"}
-        # Mock detect_urls
-        mock_detect_resp = MagicMock()
-        mock_detect_resp.json.return_value = {"results": []}
-        mock_post.side_effect = [mock_login_resp, mock_detect_resp]
-
-        det = Detector(
-            models=["yolov4"], gateway="http://gpu:5000", gateway_mode="url",
-            gateway_username="admin", gateway_password="secret",
-        )
-
-        det._remote_detect_urls([{"frame_id": "1", "url": "http://zm/img"}], "token=x")
-
-        # Second call is detect_urls
-        detect_call = mock_post.call_args_list[1]
-        assert detect_call[1]["headers"]["Authorization"] == "Bearer jwt123"
 
 
 # ===================================================================
@@ -1618,302 +1456,113 @@ class TestApplyFilters:
         assert len(filtered2) == 0
 
 
-class TestRemoteDetectFiltering:
-    """Verify that _remote_detect applies client-side filters."""
 
-    @patch("pyzm.ml.detector.requests")
-    def test_remote_detect_applies_pattern_filter(self, mock_requests):
+
+# ===================================================================
+# Remote inference (dumb gateway): routing + wire behavior
+# ===================================================================
+
+class TestRemoteInference:
+    """Client-side remote inference: build gateway client, route remote-capable
+    backends to it, cloud/audio backends stay local, and infer() hits /infer."""
+
+    def test_gateway_client_built(self):
         from pyzm.ml.detector import Detector
-        det = Detector.__new__(Detector)
-        det._config = DetectorConfig(pattern="^person$")
-        det._pipeline = None
-        det._gateway = "http://gpu:5000"
-        det._gateway_token = None
-        det._gateway_timeout = 10
-        det._gateway_username = None
-        det._gateway_password = None
+        from pyzm.ml.remote import GatewayClient
 
-        # Server returns person + car (unfiltered)
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "labels": ["person", "car"],
-            "boxes": [[0, 0, 50, 50], [60, 60, 100, 100]],
-            "confidences": [0.9, 0.8],
-            "model_names": ["yolo", "yolo"],
-            "detection_types": ["object", "object"],
-            "error_boxes": [],
-            "image_dimensions": {"original": [100, 100]},
-        }
-        mock_resp.raise_for_status = MagicMock()
-        mock_requests.post.return_value = mock_resp
+        det = Detector(models=["yolov4"], gateway="http://gpu:5000")
+        assert isinstance(det._gw_client, GatewayClient)
+        assert det._gw_client.url == "http://gpu:5000"
 
+    def test_no_gateway_no_client(self):
+        from pyzm.ml.detector import Detector
+
+        det = Detector(models=["yolov4"])
+        assert det._gw_client is None
+
+    def test_remote_capable_routed_cloud_stays_local(self):
+        """object (compute) -> RemoteInferenceBackend; alpr cloud -> stays local."""
+        from pyzm.models.config import DetectorConfig
+        from pyzm.ml.pipeline import ModelPipeline
+        from pyzm.ml.remote import GatewayClient, RemoteInferenceBackend
+
+        cfg = DetectorConfig.from_dict({
+            "general": {"model_sequence": "object,alpr", "same_model_sequence_strategy": "first"},
+            "object": {"general": {}, "sequence": [{"name": "yolov4", "object_framework": "opencv"}]},
+            "alpr": {"general": {}, "sequence": [{"name": "prcloud", "alpr_service": "plate_recognizer"}]},
+        })
+        pipe = ModelPipeline(cfg, gateway_client=GatewayClient("http://gpu:5000"))
+        pipe.prepare()
+        by_type = {mc.type.value: b for mc, b in pipe._backends}
+        assert isinstance(by_type["object"], RemoteInferenceBackend)
+        assert not isinstance(by_type["alpr"], RemoteInferenceBackend)
+
+    def test_local_pipeline_never_remote(self):
+        from pyzm.models.config import DetectorConfig
+        from pyzm.ml.pipeline import ModelPipeline
+        from pyzm.ml.remote import RemoteInferenceBackend
+
+        cfg = DetectorConfig.from_dict({
+            "general": {"model_sequence": "object", "same_model_sequence_strategy": "first"},
+            "object": {"general": {}, "sequence": [{"name": "yolov4", "object_framework": "opencv"}]},
+        })
+        pipe = ModelPipeline(cfg, gateway_client=None)
+        pipe.prepare()
+        assert not any(isinstance(b, RemoteInferenceBackend) for _, b in pipe._backends)
+
+    @patch("requests.post")
+    def test_infer_posts_to_infer_endpoint(self, mock_post):
         import numpy as np
-        image = np.zeros((100, 100, 3), dtype=np.uint8)
-        result = det._remote_detect(image)
+        from pyzm.ml.remote import GatewayClient
 
-        # Client filtered out "car" via pattern
-        assert result.labels == ["person"]
-
-    @patch("pyzm.ml.detector.requests")
-    def test_remote_detect_no_zones_sent(self, mock_requests):
-        """Verify that zones are NOT sent to the server."""
-        from pyzm.ml.detector import Detector
-        from pyzm.models.zm import Zone
-        det = Detector.__new__(Detector)
-        det._config = DetectorConfig(pattern=".*")
-        det._pipeline = None
-        det._gateway = "http://gpu:5000"
-        det._gateway_token = None
-        det._gateway_timeout = 10
-        det._gateway_username = None
-        det._gateway_password = None
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "labels": ["person"],
-            "boxes": [[0, 0, 50, 50]],
-            "confidences": [0.9],
-            "model_names": ["yolo"],
-            "detection_types": ["object"],
-            "error_boxes": [],
-            "image_dimensions": {},
-        }
-        mock_resp.raise_for_status = MagicMock()
-        mock_requests.post.return_value = mock_resp
-
-        import numpy as np
-        image = np.zeros((100, 100, 3), dtype=np.uint8)
-        zones = [Zone(name="yard", points=[(0, 0), (50, 0), (50, 50), (0, 50)], pattern="person")]
-        det._remote_detect(image, zones=zones)
-
-        # Check that "data" kwarg (form data) was NOT sent -- no zones in request
-        call_kwargs = mock_requests.post.call_args[1]
-        assert "data" not in call_kwargs or not call_kwargs.get("data")
-
-
-class TestRemoteDetectUrlsFiltering:
-    """Verify _remote_detect_urls handles per-frame results and applies filters."""
-
-    @patch("pyzm.ml.detector.requests")
-    def test_remote_detect_urls_applies_filters(self, mock_requests):
-        from pyzm.ml.detector import Detector
-        det = Detector.__new__(Detector)
-        det._config = DetectorConfig(pattern="^person$", frame_strategy=FrameStrategy.MOST)
-        det._pipeline = None
-        det._gateway = "http://gpu:5000"
-        det._gateway_token = None
-        det._gateway_timeout = 10
-        det._gateway_username = None
-        det._gateway_password = None
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "results": [
-                {
-                    "frame_id": "snapshot",
-                    "labels": ["person", "car"],
-                    "boxes": [[0, 0, 50, 50], [60, 60, 100, 100]],
-                    "confidences": [0.9, 0.8],
-                    "model_names": ["yolo", "yolo"],
-                    "detection_types": ["object", "object"],
-                    "error_boxes": [],
-                    "image_dimensions": {"original": [100, 100]},
-                },
+        resp = MagicMock()
+        resp.json.return_value = {
+            "detections": [
+                {"label": "person", "confidence": 0.9, "box": [1, 2, 3, 4],
+                 "type": "object", "model_name": "m"}
             ],
+            "error": None,
         }
-        mock_resp.raise_for_status = MagicMock()
-        mock_requests.post.return_value = mock_resp
+        resp.raise_for_status = MagicMock()
+        mock_post.return_value = resp
 
-        frame_urls = [{"frame_id": "snapshot", "url": "http://zm/image"}]
-        result = det._remote_detect_urls(frame_urls, zm_auth="token=abc")
+        gw = GatewayClient("http://gpu:5000")
+        dets = gw.infer(np.zeros((10, 10, 3), dtype=np.uint8), "object", "m")
 
-        # Pattern filter should remove "car"
-        assert result.labels == ["person"]
-        assert result.frame_id == "snapshot"
+        assert mock_post.call_args[0][0] == "http://gpu:5000/infer"
+        assert mock_post.call_args[1]["data"] == {"type": "object", "name": "m"}
+        assert len(dets) == 1
+        assert dets[0].label == "person"
+        assert dets[0].bbox.as_list() == [1, 2, 3, 4]
 
-    @patch("pyzm.ml.detector.requests")
-    def test_remote_detect_urls_empty_results(self, mock_requests):
-        from pyzm.ml.detector import Detector
-        det = Detector.__new__(Detector)
-        det._config = DetectorConfig(pattern=".*")
-        det._pipeline = None
-        det._gateway = "http://gpu:5000"
-        det._gateway_token = None
-        det._gateway_timeout = 10
-        det._gateway_username = None
-        det._gateway_password = None
+    @patch("requests.post")
+    def test_infer_raises_on_gateway_error(self, mock_post):
+        import numpy as np
+        from pyzm.ml.remote import GatewayClient
 
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"results": []}
-        mock_resp.raise_for_status = MagicMock()
-        mock_requests.post.return_value = mock_resp
+        resp = MagicMock()
+        resp.json.return_value = {"detections": [], "error": "no model"}
+        resp.raise_for_status = MagicMock()
+        mock_post.return_value = resp
 
-        result = det._remote_detect_urls([], zm_auth="")
-        assert not result.matched
+        gw = GatewayClient("http://gpu:5000")
+        with pytest.raises(RuntimeError):
+            gw.infer(np.zeros((10, 10, 3), dtype=np.uint8), "face", "")
 
+    def test_gateway_unreachable_propagates_for_fallback(self):
+        """A transport failure must raise GatewayUnreachable (so the caller can
+        fall back to local), not be swallowed as 'no detections'."""
+        import numpy as np
+        from pyzm.models.config import DetectorConfig
+        from pyzm.ml.pipeline import ModelPipeline
+        from pyzm.ml.remote import GatewayClient, GatewayUnreachable
 
-class TestDetectEventFrameSelection:
-    """Tests for the three-way frame selection logic in detect_event (URL gateway mode)."""
-
-    def _make_detector(self, gateway="http://gpu:5000"):
-        from pyzm.ml.detector import Detector
-        det = Detector.__new__(Detector)
-        det._config = DetectorConfig(pattern=".*")
-        det._pipeline = None
-        det._gateway = gateway
-        det._gateway_mode = "url"
-        det._gateway_token = None
-        det._gateway_timeout = 10
-        det._gateway_username = None
-        det._gateway_password = None
-        return det
-
-    def _make_zm_client(self, portal="http://zm"):
-        zm = MagicMock()
-        zm.api.portal_url = portal
-        zm.api.auth.get_auth_string.return_value = "token=abc"
-        zm.api.config.verify_ssl = True
-        return zm
-
-    @patch("pyzm.ml.detector.requests")
-    def test_frame_set_explicit_uses_frame_set(self, mock_requests):
-        """When frame_set has values, they are used as-is."""
-        from pyzm.models.config import StreamConfig
-        from pyzm.ml.detector import Detector
-
-        det = self._make_detector()
-        zm = self._make_zm_client()
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"results": []}
-        mock_resp.raise_for_status = MagicMock()
-        mock_requests.post.return_value = mock_resp
-
-        sc = StreamConfig(frame_set=["snapshot", "alarm", "50"])
-        try:
-            det.detect_event(zm, event_id=1, stream_config=sc)
-        except Exception:
-            pass
-        call_kwargs = mock_requests.post.call_args.kwargs
-        frame_ids = [u["frame_id"] for u in call_kwargs["json"]["urls"]]
-        assert frame_ids == ["snapshot", "alarm", "50"]
-
-    @patch("pyzm.ml.detector.requests")
-    def test_frame_set_empty_with_max_frames_uses_skip(self, mock_requests):
-        """When frame_set=[] and max_frames>0, uses start_frame+frame_skip."""
-        from pyzm.models.config import StreamConfig
-
-        det = self._make_detector()
-        zm = self._make_zm_client()
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"results": []}
-        mock_resp.raise_for_status = MagicMock()
-        mock_requests.post.return_value = mock_resp
-
-        sc = StreamConfig(frame_set=[], start_frame=50, frame_skip=25, max_frames=4)
-        try:
-            det.detect_event(zm, event_id=1, stream_config=sc)
-        except Exception:
-            pass
-        payload = mock_requests.post.call_args[1]["json"]
-        frame_ids = [u["frame_id"] for u in payload["urls"]]
-        assert frame_ids == ["50", "75", "100", "125"]
-
-    @patch("pyzm.ml.detector.requests")
-    def test_frame_set_empty_without_max_frames_falls_back(self, mock_requests):
-        """When frame_set=[] and max_frames=0, falls back to default snapshot/alarm/1."""
-        from pyzm.models.config import StreamConfig
-
-        det = self._make_detector()
-        zm = self._make_zm_client()
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"results": []}
-        mock_resp.raise_for_status = MagicMock()
-        mock_requests.post.return_value = mock_resp
-
-        sc = StreamConfig(frame_set=[], max_frames=0)
-        try:
-            det.detect_event(zm, event_id=1, stream_config=sc)
-        except Exception:
-            pass
-        # Should fall back to default frame_set
-        call_kwargs = mock_requests.post.call_args.kwargs
-        frame_ids = [u["frame_id"] for u in call_kwargs["json"]["urls"]]
-        assert frame_ids == ["snapshot", "alarm", "1"]
-
-    def _forwarded_stop_on_match(self, mock_requests, det, zm):
-        from pyzm.models.config import StreamConfig
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"results": []}
-        mock_resp.raise_for_status = MagicMock()
-        mock_requests.post.return_value = mock_resp
-        try:
-            det.detect_event(zm, event_id=1, stream_config=StreamConfig(stop_on_match=True))
-        except Exception:
-            pass
-        return mock_requests.post.call_args.kwargs["json"]["stop_on_match"]
-
-    @patch("pyzm.ml.detector.requests")
-    def test_stop_on_match_forwarded_for_first_strategy(self, mock_requests):
-        """FIRST/FIRST_NEW strategies may short-circuit: stop_on_match forwarded True."""
-        det = self._make_detector()
-        det._config.frame_strategy = FrameStrategy.FIRST
-        assert self._forwarded_stop_on_match(mock_requests, det, self._make_zm_client()) is True
-
-    @patch("pyzm.ml.detector.requests")
-    def test_stop_on_match_suppressed_for_most_strategy(self, mock_requests):
-        """most*/best strategies need every frame: stop_on_match forced False."""
-        det = self._make_detector()
-        det._config.frame_strategy = FrameStrategy.MOST_MODELS
-        assert self._forwarded_stop_on_match(mock_requests, det, self._make_zm_client()) is False
-
-
-class TestRemoteBestFrameSelection:
-    """`_remote_detect_urls` must pick the best frame across multiple gateway
-    frames for the most*/best strategies -- not just forward a flag."""
-
-    def _make_detector(self, strategy):
-        from pyzm.ml.detector import Detector
-        det = Detector.__new__(Detector)
-        det._config = DetectorConfig(pattern=".*")
-        det._config.frame_strategy = strategy
-        det._pipeline = None
-        det._gateway = "http://gpu:5000"
-        det._gateway_mode = "url"
-        det._gateway_token = None
-        det._gateway_timeout = 10
-        det._gateway_username = None
-        det._gateway_password = None
-        return det
-
-    @staticmethod
-    def _frame(fid, labels):
-        from pyzm.models.detection import BBox, Detection, DetectionResult
-        dets = [Detection(l, 0.9, BBox(0, 0, 10, 10), "yolov4") for l in labels]
-        return DetectionResult(
-            detections=dets, frame_id=fid,
-            image_dimensions={"original": (100, 100)},
-        ).to_dict()
-
-    @patch("pyzm.ml.detector.requests")
-    def test_most_strategy_returns_richest_frame(self, mock_requests):
-        from pyzm.models.config import FrameStrategy
-        det = self._make_detector(FrameStrategy.MOST)
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"results": [
-            self._frame("1", ["person"]),
-            self._frame("2", ["person", "dog", "cat"]),   # richest
-            self._frame("3", ["person", "dog"]),
-        ]}
-        mock_resp.raise_for_status = MagicMock()
-        mock_requests.post.return_value = mock_resp
-
-        frame_urls = [{"frame_id": str(i), "url": f"http://zm/i?fid={i}"} for i in (1, 2, 3)]
-        result = det._remote_detect_urls(frame_urls, zm_auth="", zones=None)
-
-        assert result.frame_id == "2"
-        assert len(result.detections) == 3
+        cfg = DetectorConfig.from_dict({
+            "general": {"model_sequence": "object", "same_model_sequence_strategy": "first"},
+            "object": {"general": {}, "sequence": [{"name": "yolov4", "object_framework": "opencv"}]},
+        })
+        # 127.0.0.1:1 -> connection refused
+        pipe = ModelPipeline(cfg, gateway_client=GatewayClient("http://127.0.0.1:1", timeout=2))
+        pipe.load()
+        with pytest.raises(GatewayUnreachable):
+            pipe.run(np.zeros((10, 10, 3), dtype=np.uint8))

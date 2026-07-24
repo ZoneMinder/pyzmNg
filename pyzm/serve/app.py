@@ -1,16 +1,20 @@
-"""FastAPI application factory for the pyzm ML detection server."""
+"""FastAPI application factory for the pyzm ML detection server.
+
+The server is a dumb inference engine: given one image and one model reference
+(type + optional name) it runs that single model and returns raw detections.
+It performs no filtering, no model-sequence orchestration, and no frame
+selection -- all of that stays on the client (see pyzm.ml.pipeline /
+pyzm.ml.remote). This is what keeps local and remote detection identical.
+"""
 
 from __future__ import annotations
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-import requests as http_requests
-from fastapi import Body, Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 
 from pyzm.ml.detector import Detector
-from pyzm.ml.filters import filter_by_pattern, filter_by_zone
 from pyzm.models.config import ServerConfig
 from pyzm.serve.auth import create_login_route, create_token_dependency
 
@@ -132,134 +136,64 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             })
         return {"models": result}
 
-    @app.post("/detect", dependencies=auth_deps)
-    async def detect(file: UploadFile = File(...)):
+    def _find_backend(pipeline, mtype: str, name: str):
+        """Return the loaded backend matching (type, optional name), or None."""
+        if pipeline is None:
+            return None
+        # name is a preference: exact (type,name) wins; otherwise fall back to
+        # the first loaded model of that type (server model names need not equal
+        # the client's config names).
+        fallback = None
+        for mc, backend in pipeline._backends:
+            if mc.type.value != mtype:
+                continue
+            if name and (mc.name or "") == name:
+                return backend
+            if fallback is None:
+                fallback = backend
+        return fallback
+
+    @app.post("/infer", dependencies=auth_deps)
+    async def infer(
+        image: UploadFile = File(...),
+        type: str = Form(...),
+        name: str = Form(""),
+    ):
+        """Run ONE model on ONE image, return raw (unfiltered) detections."""
         import cv2
         import numpy as np
 
-        contents = await file.read()
+        contents = await image.read()
         if not contents:
             raise HTTPException(status_code=400, detail="Empty file")
-
         arr = np.frombuffer(contents, dtype=np.uint8)
-        image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if image is None:
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if frame is None:
             raise HTTPException(status_code=400, detail="Could not decode image")
 
         detector: Detector = app.state.detector
-        result = detector.detect(image)
+        backend = _find_backend(detector._pipeline, type, name)
+        if backend is None:
+            return {"detections": [], "error": f"no model loaded for type={type} name={name!r}"}
 
-        data = result.to_dict()
-        data.pop("image", None)
-        return data
+        try:
+            detections = backend.detect(frame)
+        except Exception as exc:  # inference failure -> report, don't 500
+            logger.exception("Inference failed for type=%s name=%s", type, name)
+            return {"detections": [], "error": str(exc)}
 
-    @app.post("/detect_urls", dependencies=auth_deps)
-    async def detect_urls(payload: dict = Body(...)):
-        """Fetch images from URLs, run inference, return per-frame raw results."""
-        import cv2
-        import numpy as np
-
-        urls = payload.get("urls", [])
-        zm_auth = payload.get("zm_auth", "")
-        verify_ssl = payload.get("verify_ssl", True)
-
-        if not urls:
-            raise HTTPException(status_code=400, detail="No URLs provided")
-
-        detector: Detector = app.state.detector
-        results = []
-        # Track consecutive 404s to detect end-of-event early
-        consecutive_404 = 0
-        max_consecutive_404 = payload.get("contig_frames_before_error", 5)
-
-        for entry in urls:
-            fid = str(entry.get("frame_id", ""))
-            url = entry.get("url", "")
-            if not url:
-                continue
-
-            if zm_auth:
-                sep = "&" if "?" in url else "?"
-                url = f"{url}{sep}{zm_auth}"
-
-            try:
-                resp = http_requests.get(url, timeout=10, verify=verify_ssl)
-                if resp.status_code == 404:
-                    # Frame may not exist yet (live event still being written).
-                    # Retry up to max_attempts times before counting as missing.
-                    max_attempts = payload.get("max_attempts", 1)
-                    sleep_secs = payload.get("sleep_between_attempts", 3)
-                    fetched = False
-                    for attempt in range(1, max_attempts + 1):
-                        if attempt > 1:
-                            logger.info("Frame %s: does not exist yet, retrying in %ds (attempt %d/%d)", fid, sleep_secs, attempt, max_attempts)
-                            await asyncio.sleep(sleep_secs)
-                            resp2 = http_requests.get(url, timeout=10, verify=verify_ssl)
-                            if resp2.status_code != 404:
-                                resp = resp2
-                                fetched = True
-                                break
-                    if not fetched:
-                        consecutive_404 += 1
-                        logger.info("Frame %s: does not exist yet, skipping (%d consecutive)", fid, consecutive_404)
-                        if consecutive_404 >= max_consecutive_404:
-                            logger.info("Stopping after %d consecutive missing frames", consecutive_404)
-                            break
-                        continue
-                consecutive_404 = 0
-                logger.info("Frame %s: fetched OK, running inference", fid)
-                resp.raise_for_status()
-                arr = np.frombuffer(resp.content, dtype=np.uint8)
-                image = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                if image is None:
-                    logger.warning("Could not decode image from URL for frame %s", fid)
-                    continue
-            except Exception:
-                logger.exception("Failed to fetch frame %s", fid)
-                continue
-
-            result = detector.detect(image)
-
-            # --- Server-side filters ---
-            # 1. Confidence filter: drop detections below the threshold
-            #    forwarded by the client (derived from model min_confidence).
-            min_confidence = payload.get("min_confidence", 0.3)
-            filtered_low = [d for d in result.detections if d.confidence < min_confidence]
-            if filtered_low:
-                logger.info(
-                    "Frame %s: %d detection(s) below min_confidence %.0f%% filtered out: %s",
-                    fid, len(filtered_low), min_confidence * 100,
-                    [(d.label, round(d.confidence * 100)) for d in filtered_low],
-                )
-            result.detections = [d for d in result.detections if d.confidence >= min_confidence]
-
-            # 2. Pattern filter: keep only labels matching the client regex
-            #    (e.g. "(person)" to ignore dog/cat detections).
-            pattern = payload.get("pattern", ".*")
-            if pattern and pattern != ".*":
-                result.detections = filter_by_pattern(result.detections, pattern)
-
-            data = result.to_dict()
-            data.pop("image", None)
-            data["frame_id"] = fid
-
-            # 3. Zone short-circuit: check whether any surviving detection
-            #    falls inside the requested zone polygons.
-            #    NOTE: we do NOT reassign result.detections here — all detections
-            #    (in-zone and out-of-zone) are returned to the client so it can
-            #    apply its own zone filtering and log what was discarded.
-            #    The zone check here is only used to drive stop_on_match.
-            zones_data = payload.get("zones", [])
-            has_zone_match = True
-            if zones_data and result.detections:
-                h, w = image.shape[:2]
-                kept, _ = filter_by_zone(result.detections, zones_data, (h, w))
-                has_zone_match = len(kept) > 0
-
-            results.append(data)
-            if payload.get("stop_on_match", True) and data.get("labels") and has_zone_match:
-                break
-
-        return {"results": results}
+        return {
+            "detections": [
+                {
+                    "label": d.label,
+                    "confidence": d.confidence,
+                    "box": d.bbox.as_list(),
+                    "type": d.detection_type,
+                    "model_name": d.model_name,
+                }
+                for d in detections
+            ],
+            "error": None,
+        }
 
     return app
