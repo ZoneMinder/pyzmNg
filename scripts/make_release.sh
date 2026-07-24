@@ -62,6 +62,14 @@ else
         echo "ERROR: pyzm gate FAILED -- aborting release"
         exit 1
     fi
+    # 1b. Real-model local<->remote parity (needs models, not live ZM).
+    # PYZM_E2E_REQUIRE=1 => missing models FAIL instead of silently skipping,
+    # so a green release proves remote detection matches local on a real model.
+    echo "Running real-model remote parity e2e ..."
+    if ! PYZM_E2E_REQUIRE=1 python3 -m pytest tests/test_ml_e2e/test_remote_serve.py -m serve -q; then
+        echo "ERROR: remote parity e2e FAILED -- aborting release"
+        exit 1
+    fi
     # 2. Cross-repo e2e (ES hook chain vs this pyzm + contract test).
     ES_DIR="${ES_DIR:-$(cd "$REPO_DIR/../zmeventnotificationNg" 2>/dev/null && pwd || echo "$REPO_DIR/../zmeventnotificationNg")}"
     if [ ! -d "$ES_DIR" ]; then
