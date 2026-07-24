@@ -1566,3 +1566,54 @@ class TestRemoteInference:
         pipe.load()
         with pytest.raises(GatewayUnreachable):
             pipe.run(np.zeros((10, 10, 3), dtype=np.uint8))
+
+    @patch("requests.post")
+    def test_infer_url_mode_sends_ref_not_image(self, mock_post):
+        import numpy as np
+        from pyzm.ml.remote import GatewayClient
+
+        resp = MagicMock()
+        resp.json.return_value = {"detections": [], "error": None}
+        resp.raise_for_status = MagicMock()
+        mock_post.return_value = resp
+
+        gw = GatewayClient("http://gpu:5000")
+        gw.current_frame = {"url": "http://zm/img?eid=1&fid=snapshot", "zm_auth": "t", "verify_ssl": True}
+        gw.infer(np.zeros((2, 2, 3), dtype=np.uint8), "object", "m")
+
+        kwargs = mock_post.call_args.kwargs
+        assert kwargs["files"] is None                       # no pixels uploaded
+        assert kwargs["data"]["url"] == "http://zm/img?eid=1&fid=snapshot"
+        assert kwargs["data"]["zm_auth"] == "t"
+
+    def test_detect_event_url_mode_no_local_download(self):
+        from pyzm.ml.detector import Detector
+        from pyzm.ml.remote import GatewayClient
+        from pyzm.models.config import DetectorConfig, StreamConfig
+
+        cfg = DetectorConfig.from_dict({
+            "general": {"model_sequence": "object", "same_model_sequence_strategy": "first"},
+            "object": {"general": {}, "sequence": [{"name": "o", "object_framework": "opencv"}]},
+        })
+        det = Detector(config=cfg, gateway="http://gpu:5000", gateway_mode="url")
+
+        zm = MagicMock()
+        zm.api.portal_url = "http://zm"
+        zm.api.auth.get_auth_string.return_value = "token=x"
+        zm.api.config.verify_ssl = True
+        ev = MagicMock(); ev.monitor_id = 5
+        zm.event.return_value = ev
+        mon = MagicMock(); mon.height = 100; mon.width = 200
+        zm.monitor.return_value = mon
+
+        seen = []
+        def fake_infer(self, image, t, n):
+            seen.append((t, self.current_frame["url"]))
+            return []
+        with patch.object(GatewayClient, "infer", fake_infer):
+            det.detect_event(zm, 42, stream_config=StreamConfig(frame_set=["snapshot", "alarm"]))
+
+        ev.extract_frames.assert_not_called()                # never downloaded frames
+        assert seen[0][0] == "object"
+        assert "eid=42" in seen[0][1] and "fid=snapshot" in seen[0][1]
+        assert "fid=alarm" in seen[1][1]

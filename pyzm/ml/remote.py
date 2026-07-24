@@ -54,6 +54,10 @@ class GatewayClient:
         self._password = password
         self._timeout = timeout
         self._token: str | None = None
+        # URL mode: when set (per frame, by the Detector), infer() tells the
+        # gateway to FETCH the frame from ZM instead of uploading pixels.
+        # Shape: {"url": <zm image url>, "zm_auth": <token>, "verify_ssl": bool}.
+        self.current_frame: dict | None = None
 
     def _auth_headers(self) -> dict[str, str]:
         if self._token:
@@ -70,20 +74,30 @@ class GatewayClient:
         return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
     def infer(self, image: "np.ndarray", mtype: str, name: str) -> list[Detection]:
-        """Run one model on one image on the gateway, return raw detections."""
-        import cv2  # lazy
+        """Run one model on one frame on the gateway, return raw detections.
 
-        # PNG (lossless) so the gateway runs inference on pixels identical to the
-        # local path -> exact local<->remote parity. JPEG would recompress and
-        # shift detections by a few pixels.
-        ok, buf = cv2.imencode(".png", image)
-        if not ok:
-            raise ValueError("Failed to encode frame for remote inference")
+        URL mode (``current_frame`` set): send a ZM frame reference and let the
+        gateway fetch it. Image mode: upload the decoded frame as lossless PNG
+        (identical pixels -> exact local<->remote parity).
+        """
+        frame = self.current_frame
+        data = {"type": mtype, "name": name or ""}
+        files = None
+        if frame:
+            data["url"] = frame["url"]
+            data["zm_auth"] = frame.get("zm_auth", "")
+            data["verify_ssl"] = "1" if frame.get("verify_ssl", True) else "0"
+        else:
+            import cv2  # lazy
+            ok, buf = cv2.imencode(".png", image)
+            if not ok:
+                raise ValueError("Failed to encode frame for remote inference")
+            files = {"image": ("frame.png", buf.tobytes(), "image/png")}
         try:
             resp = requests.post(
                 f"{self.url}/infer",
-                files={"image": ("frame.png", buf.tobytes(), "image/png")},
-                data={"type": mtype, "name": name or ""},
+                data=data,
+                files=files,
                 headers=self._auth_headers(),
                 timeout=self._timeout,
             )

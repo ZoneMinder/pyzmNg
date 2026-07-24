@@ -441,6 +441,18 @@ class Detector:
 
         sc = stream_config or SC()
 
+        # URL mode: the gateway fetches frames from ZM, so we never download
+        # them here. Only possible when every enabled model is remote-capable
+        # (a client-side model, e.g. cloud ALPR or audio, needs local pixels).
+        if self._gateway and self._gateway_mode == "url":
+            from pyzm.ml.pipeline import REMOTE_CAPABLE_FRAMEWORKS
+            enabled = [mc for mc in self._config.models if mc.enabled]
+            if enabled and all(mc.framework in REMOTE_CAPABLE_FRAMEWORKS for mc in enabled):
+                return self._detect_event_url(zm_client, event_id, zones, sc)
+            logger.info(
+                "URL mode: a client-side model is enabled; downloading frames locally."
+            )
+
         # Get Event object and extract frames via OOP API
         ev = zm_client.event(event_id)
         result = ev.extract_frames(stream_config=sc)
@@ -480,6 +492,80 @@ class Detector:
                     os.unlink(wav_path)
                 except OSError:
                     pass
+
+    @staticmethod
+    def _url_frame_ids(sc) -> list[str]:
+        """Frame ids to analyse in URL mode (no local download)."""
+        if sc.frame_set:
+            return [str(f) for f in sc.frame_set]
+        if sc.max_frames:
+            start = sc.start_frame or 1
+            skip = sc.frame_skip or 1
+            return [str(start + i * skip) for i in range(sc.max_frames)]
+        return ["snapshot", "alarm", "1"]
+
+    def _detect_event_url(self, zm_client, event_id, zones, sc) -> DetectionResult:
+        """URL mode: the gateway fetches each frame; we never download pixels.
+
+        Frame dimensions (needed for client-side size/zone filters) come from the
+        monitor, not the image. The pipeline runs on a correctly-sized blank
+        frame; each RemoteInferenceBackend fetches the real frame from ZM via the
+        gateway using the per-frame context set below.
+        """
+        import numpy as np
+        from pyzm.ml.remote import GatewayUnreachable
+
+        api = zm_client.api
+        portal = api.portal_url
+        auth = api.auth.get_auth_string()
+        verify = api.config.verify_ssl
+        ev = zm_client.event(event_id)
+
+        h = w = 0
+        try:
+            mon = zm_client.monitor(ev.monitor_id)
+            h, w = int(mon.height), int(mon.width)
+        except Exception:
+            logger.debug("URL mode: could not read monitor dimensions", exc_info=True)
+        if not (h and w):
+            logger.info("URL mode: monitor dimensions unavailable; downloading frames.")
+            result = ev.extract_frames(stream_config=sc)
+            frames = result[0] if isinstance(result, tuple) else result
+            if not frames:
+                return DetectionResult()
+            return self._detect_multi_frame(frames, zones, self._ensure_pipeline())
+
+        pipeline = self._ensure_pipeline()
+        strategy = self._config.frame_strategy
+        blank = np.zeros((h, w, 3), dtype=np.uint8)
+        results: list[DetectionResult] = []
+        try:
+            for fid in self._url_frame_ids(sc):
+                self._gw_client.current_frame = {
+                    "url": f"{portal}/index.php?view=image&eid={event_id}&fid={fid}",
+                    "zm_auth": auth, "verify_ssl": verify,
+                }
+                try:
+                    r = pipeline.run(blank, zones=zones)
+                except GatewayUnreachable:
+                    raise  # let event-level fallback (ml_fallback_local) handle it
+                except Exception:
+                    logger.exception("URL-mode detection failed for frame %s", fid)
+                    continue
+                r.frame_id = fid
+                results.append(r)
+                if strategy in (FrameStrategy.FIRST, FrameStrategy.FIRST_NEW) and r.matched:
+                    break
+        finally:
+            self._gw_client.current_frame = None
+
+        if not results:
+            return DetectionResult()
+        best = results[0]
+        for r in results[1:]:
+            if _is_better(r, best, strategy):
+                best = r
+        return best
 
     # -- class methods --------------------------------------------------------
 

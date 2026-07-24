@@ -9,9 +9,11 @@ pyzm.ml.remote). This is what keeps local and remote detection identical.
 
 from __future__ import annotations
 import logging
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from typing import Any
 
+import requests as http_requests
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 
 from pyzm.ml.detector import Detector
@@ -153,23 +155,59 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                 fallback = backend
         return fallback
 
+    # Tiny decoded-frame cache keyed by URL so multiple models on the same
+    # frame (URL mode) fetch+decode it once. Bounded; transparent optimization.
+    _frame_cache: "OrderedDict[str, Any]" = OrderedDict()
+
+    def _fetch_frame(url: str, zm_auth: str, verify_ssl: bool):
+        import cv2
+        import numpy as np
+        if url in _frame_cache:
+            _frame_cache.move_to_end(url)
+            return _frame_cache[url]
+        full = url if not zm_auth else f"{url}{'&' if '?' in url else '?'}{zm_auth}"
+        resp = http_requests.get(full, timeout=10, verify=verify_ssl)
+        resp.raise_for_status()
+        arr = np.frombuffer(resp.content, dtype=np.uint8)
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if frame is None:
+            raise ValueError("could not decode fetched frame")
+        _frame_cache[url] = frame
+        if len(_frame_cache) > 8:
+            _frame_cache.popitem(last=False)
+        return frame
+
     @app.post("/infer", dependencies=auth_deps)
     async def infer(
-        image: UploadFile = File(...),
         type: str = Form(...),
         name: str = Form(""),
+        image: UploadFile = File(None),
+        url: str = Form(""),
+        zm_auth: str = Form(""),
+        verify_ssl: str = Form("1"),
     ):
-        """Run ONE model on ONE image, return raw (unfiltered) detections."""
+        """Run ONE model on ONE frame, return raw (unfiltered) detections.
+
+        URL mode: `url` set -> the server fetches the frame from ZM.
+        Image mode: `image` uploaded -> inference on the uploaded frame.
+        """
         import cv2
         import numpy as np
 
-        contents = await image.read()
-        if not contents:
-            raise HTTPException(status_code=400, detail="Empty file")
-        arr = np.frombuffer(contents, dtype=np.uint8)
-        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if frame is None:
-            raise HTTPException(status_code=400, detail="Could not decode image")
+        if url:
+            try:
+                frame = _fetch_frame(url, zm_auth, verify_ssl not in ("0", "false", "False", ""))
+            except Exception as exc:
+                logger.exception("URL-mode fetch failed: %s", url)
+                return {"detections": [], "error": f"fetch failed: {exc}"}
+        else:
+            contents = await image.read() if image is not None else b""
+            if not contents:
+                raise HTTPException(status_code=400, detail="Empty file")
+            arr = np.frombuffer(contents, dtype=np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame is None:
+                raise HTTPException(status_code=400, detail="Could not decode image")
 
         detector: Detector = app.state.detector
         backend = _find_backend(detector._pipeline, type, name)

@@ -14,10 +14,11 @@ inference to a dedicated machine.
    past-detection dedup) plus frame selection -- runs on the **client** using
    your ``objectconfig.yml``. The server holds only model files and a processor
    setting. This is what makes local and remote detection identical (the test
-   suite asserts local/remote parity). The client uploads frames it
-   fetched from ZoneMinder (image mode). Letting the server fetch frames
-   directly from ZM (the older "URL mode" below) is a planned enhancement and
-   not currently wired to ``/infer``.
+   suite asserts local/remote parity). Two transports feed ``/infer``: **URL
+   mode** (default) sends a frame reference and the server fetches it from ZM;
+   **image mode** uploads the decoded frame as lossless PNG. URL mode needs
+   every enabled model to be gateway-run (a client-side model such as cloud
+   ALPR forces image mode for that event).
 
 .. code-block:: text
 
@@ -579,18 +580,20 @@ Returns the list of available models and their load status. Useful with
 ``POST /infer``
 ~~~~~~~~~~~~~~~~
 
-Run **one** model on **one** uploaded image and return **raw, unfiltered**
-detections. The server does no filtering, no model-sequence orchestration and
-no frame selection -- the client's :class:`ModelPipeline` does all of that, so
-local and remote detection produce identical results.
+Run **one** model on **one** frame and return **raw, unfiltered** detections.
+The server does no filtering, no model-sequence orchestration and no frame
+selection -- the client's :class:`ModelPipeline` does all of that, so local and
+remote detection produce identical results.
 
 - **Content-Type:** ``multipart/form-data``
 - **Parameters:**
 
-  - ``image`` (required) -- PNG (lossless, so remote pixels match local) or JPEG
   - ``type`` (required) -- model type: ``object``, ``face``, ``alpr``, ``audio``
   - ``name`` (optional) -- model name; when omitted the server uses its loaded
     model of that ``type``
+  - **URL mode:** ``url`` (ZM image URL) + ``zm_auth`` (token) + ``verify_ssl``
+    (``"1"``/``"0"``) -- the server fetches the frame from ZM
+  - **Image mode:** ``image`` -- an uploaded frame (PNG lossless, or JPEG)
 
 - **Auth:** Bearer token (when auth enabled)
 - **Returns:**

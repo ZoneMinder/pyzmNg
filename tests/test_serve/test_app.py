@@ -186,6 +186,26 @@ class TestInfer:
         )
         assert len(resp.json()["detections"]) == 1
 
+    def test_infer_url_mode_server_fetches(self, client, monkeypatch):
+        # URL mode: no uploaded image; server fetches the frame from ZM.
+        import pyzm.serve.app as appmod
+        resp = MagicMock()
+        resp.content = self._jpeg()
+        resp.raise_for_status = MagicMock()
+        seen = {}
+        def fake_get(u, **k):
+            seen["url"] = u
+            return resp
+        monkeypatch.setattr(appmod.http_requests, "get", fake_get)
+        r = client.post("/infer", data={
+            "type": "object",
+            "url": "http://zm/index.php?view=image&eid=1&fid=snapshot",
+            "zm_auth": "token=x",
+        })
+        assert r.status_code == 200
+        assert r.json()["detections"][0]["label"] == "person"
+        assert "token=x" in seen["url"]        # zm_auth appended to the fetch
+
     def test_infer_inference_error_reported(self, client, monkeypatch):
         # A backend that raises -> reported in `error`, not a 500.
         from fastapi.testclient import TestClient  # noqa: F401
