@@ -1617,3 +1617,34 @@ class TestRemoteInference:
         assert seen[0][0] == "object"
         assert "eid=42" in seen[0][1] and "fid=snapshot" in seen[0][1]
         assert "fid=alarm" in seen[1][1]
+
+    def test_gateway_missing_model_warns_and_skips(self, caplog):
+        """Gateway lacking a model -> one WARNING, that model skipped, others run."""
+        import logging
+        import numpy as np
+        from pyzm.models.config import DetectorConfig
+        from pyzm.ml.pipeline import ModelPipeline
+        from pyzm.ml.remote import GatewayClient, GatewayModelError
+        from pyzm.models.detection import BBox, Detection
+
+        cfg = DetectorConfig.from_dict({
+            "general": {"model_sequence": "object,face", "same_model_sequence_strategy": "union",
+                        "pattern": ".*"},
+            "object": {"general": {"pattern": ".*"}, "sequence": [{"name": "o", "object_framework": "opencv"}]},
+            "face": {"general": {"pattern": ".*"}, "sequence": [{"name": "f", "face_detection_framework": "dlib"}]},
+        })
+
+        def infer(self, image, t, n):
+            if t == "face":
+                raise GatewayModelError("no model loaded for type=face name='f'")
+            return [Detection("person", 0.9, BBox(1, 1, 5, 5), "o", "object")]
+
+        with patch.object(GatewayClient, "infer", infer):
+            pipe = ModelPipeline(cfg, gateway_client=GatewayClient("http://gpu:5000"))
+            pipe.load()
+            with caplog.at_level(logging.WARNING, logger="pyzm.ml"):
+                res = pipe.run(np.zeros((10, 10, 3), dtype=np.uint8))
+
+        assert res.labels == ["person"]                       # object survived
+        assert any("Gateway cannot run" in r.message for r in caplog.records)  # clear warning
+        assert not any(r.levelname == "ERROR" for r in caplog.records)         # not a traceback

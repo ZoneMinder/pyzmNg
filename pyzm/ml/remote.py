@@ -32,10 +32,14 @@ class GatewayUnreachable(Exception):
     """The gateway could not be reached (connection/timeout/HTTP error).
 
     Raised for *transport* failures so the pipeline lets it propagate to the
-    event-level fallback (ml_fallback_local) instead of swallowing it as a
-    per-model "no detections". A per-model gateway error (unknown model on the
-    server) is a plain RuntimeError -- swallowed and skipped like a local model
-    that fails to load.
+    event-level fallback (ml_fallback_local).
+    """
+
+
+class GatewayModelError(RuntimeError):
+    """The gateway reached us but could not run this model (e.g. it has no model
+    of that type loaded, or fetching the frame failed). The pipeline logs a
+    clear one-line warning and skips this model -- it is not a crash.
     """
 
 
@@ -106,7 +110,7 @@ class GatewayClient:
             raise GatewayUnreachable(str(exc)) from exc
         payload = resp.json()
         if payload.get("error"):
-            raise RuntimeError(f"Gateway error for {mtype}/{name}: {payload['error']}")
+            raise GatewayModelError(payload["error"])
         return [_detection_from_dict(d, name) for d in payload.get("detections", [])]
 
 

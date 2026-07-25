@@ -334,11 +334,19 @@ class ModelPipeline:
                     logger.debug("%s: no detections", backend.name)
             except Exception as exc:
                 # A gateway transport failure must bubble up so the caller can
-                # fall back to local detection (ml_fallback_local); a per-model
-                # error is logged and skipped like a local load failure.
-                from pyzm.ml.remote import GatewayUnreachable
+                # fall back to local detection (ml_fallback_local).
+                from pyzm.ml.remote import GatewayModelError, GatewayUnreachable
                 if isinstance(exc, GatewayUnreachable):
                     raise
+                if isinstance(exc, GatewayModelError):
+                    # The gateway ran but can't serve this model (usually it has
+                    # no model of that type loaded). One clear line, then skip.
+                    logger.warning(
+                        "Gateway cannot run %s: %s. Load that model on the "
+                        "gateway (pyzm.serve --config), or run it locally.",
+                        backend.name, exc,
+                    )
+                    continue
                 logger.exception("Error running %s", backend.name)
                 continue
 
