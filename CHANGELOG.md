@@ -3,6 +3,36 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.5.0] - 2026-07-26
+
+### Bug Fixes
+
+- give the client back the settings it owns in remote mode ([4ec4197](https://github.com/ZoneMinder/pyzmNg/commit/4ec4197a9d46e0aa8df8d7dbc917ccb8b229ccca))
+- keep tracebacks when logging exceptions to ZM ([1081771](https://github.com/ZoneMinder/pyzmNg/commit/1081771678d15d9dae8aea7dfa8dcec01ccef84b))
+- clear warning when the gateway lacks a requested model ([1bc1cf0](https://github.com/ZoneMinder/pyzmNg/commit/1bc1cf0f084737a7dbd7b360fc24cd1177bde0b5))
+
+### Documentation
+
+- install from release packages, and point at [full] for training ([8ff8efb](https://github.com/ZoneMinder/pyzmNg/commit/8ff8efbdcbef618b7c8482c544f3f4095b34fedc))
+- correct the serve guide after the dumb-gateway rework ([0d448a8](https://github.com/ZoneMinder/pyzmNg/commit/0d448a8f4df2d07a285916c32f2817e382630f73))
+
+### Features
+
+- serve a model under the name clients ask for ([397e02c](https://github.com/ZoneMinder/pyzmNg/commit/397e02c08673df08773222929b4f16ba0508b1d3))
+- URL mode — gateway fetches frames from ZM (default) ([ed15814](https://github.com/ZoneMinder/pyzmNg/commit/ed15814b26b5123f63dfe6841b19dc24aeb8c30b))
+- dumb remote inference gateway with local↔remote parity ([08358bc](https://github.com/ZoneMinder/pyzmNg/commit/08358bc5273183539a0f4583d7a27aadb029706f))
+
+### Miscellaneous
+
+- run e2e verbosely (-v) so test names show ([4096c97](https://github.com/ZoneMinder/pyzmNg/commit/4096c973dd145e8facf764b17120e162057a7b77))
+- run real-model remote parity e2e before release ([19f8799](https://github.com/ZoneMinder/pyzmNg/commit/19f87999b01d3e86536987f616611077d9d30b25))
+- validate once, --no-verify internal pushes ([8c53fca](https://github.com/ZoneMinder/pyzmNg/commit/8c53fca87df011f65f6db6851a0732f994c25aff))
+
+### Testing
+
+- real-ZM URL-mode local↔remote parity ([8328b61](https://github.com/ZoneMinder/pyzmNg/commit/8328b61741ae55b15cef79f330db6f5308d38907))
+- multi-type + multi-frame local↔remote parity ([48199f7](https://github.com/ZoneMinder/pyzmNg/commit/48199f792c2b995b245f205487e998c156ec82aa))
+
 ## [2.4.0] - 2026-07-23
 
 ### Bug Fixes
@@ -11,6 +41,10 @@ All notable changes to this project will be documented in this file.
 - correct multi-worker auth, guard stop_on_match, docs ([2699097](https://github.com/ZoneMinder/pyzmNg/commit/2699097639d09654b87905c3e520178714838400))
 - address review feedback before merge ([6b23851](https://github.com/ZoneMinder/pyzmNg/commit/6b23851256957826acad77824c91cbc12cce85b1))
 - retry transient connection drops instead of crashing ([563584f](https://github.com/ZoneMinder/pyzmNg/commit/563584fdbaf1d45ea13685f8a30af9ee6d38cfb5))
+
+### Documentation
+
+- update CHANGELOG for v2.4.0 ([1088cb9](https://github.com/ZoneMinder/pyzmNg/commit/1088cb9a02a00be03c30aa70b014be7bcc6affc8))
 
 ### Features
 
