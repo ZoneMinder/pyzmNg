@@ -371,6 +371,35 @@ class TestModelDiscovery:
         assert mc.name == "unknown_model"
         assert mc.processor == Processor.GPU
 
+    def test_resolve_published_name_overrides_derived_name(self, tmp_path):
+        """'<published name>=<spec>' loads spec but serves it under that name.
+
+        A remote client asks for a model by the name in its own config; this is
+        how a gateway answers to that name without renaming weight files.
+        """
+        from pyzm.ml.detector import _resolve_model_name
+
+        self._make_onnx_dir(tmp_path, "ultralytics", "yolo11s")
+        mc = _resolve_model_name("YOLOv11 ONNX=yolo11s", tmp_path)
+
+        assert mc.name == "YOLOv11 ONNX"          # what clients ask for
+        assert mc.weights.endswith("yolo11s.onnx")  # what actually loads
+
+    def test_resolve_published_name_tolerates_spaces(self, tmp_path):
+        from pyzm.ml.detector import _resolve_model_name
+
+        self._make_onnx_dir(tmp_path, "ultralytics", "yolo11s")
+        mc = _resolve_model_name("  My Model = yolo11s ", tmp_path)
+
+        assert mc.name == "My Model"
+        assert mc.weights.endswith("yolo11s.onnx")
+
+    def test_resolve_without_published_name_is_unchanged(self, tmp_path):
+        from pyzm.ml.detector import _resolve_model_name
+
+        self._make_onnx_dir(tmp_path, "ultralytics", "yolo11s")
+        assert _resolve_model_name("yolo11s", tmp_path).name == "yolo11s"
+
     def test_detector_init_with_base_path(self, tmp_path):
         from pyzm.ml.detector import Detector
 

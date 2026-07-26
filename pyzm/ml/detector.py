@@ -145,6 +145,31 @@ def _resolve_model_name(
     base_path: Path,
     processor: Processor = Processor.CPU,
 ) -> ModelConfig:
+    """Resolve a model spec, optionally prefixed with the name to publish it as.
+
+    ``"<published name>=<spec>"`` loads *spec* but calls the model *published
+    name*. A remote client asks for a model by name, so this is how a gateway
+    serves the names that appear in the client's config without renaming files:
+    ``--models "YOLOv11 ONNX=yolo11s"``.
+
+    A plain spec keeps whatever name the resolver derives from the weights.
+    """
+    alias = None
+    if "=" in name:
+        alias, name = name.split("=", 1)
+        alias, name = alias.strip(), name.strip()
+
+    resolved = _resolve_model_spec(name, base_path, processor)
+    if alias:
+        return resolved.model_copy(update={"name": alias})
+    return resolved
+
+
+def _resolve_model_spec(
+    name: str,
+    base_path: Path,
+    processor: Processor = Processor.CPU,
+) -> ModelConfig:
     """Resolve a model name string against a base directory.
 
     Search order:

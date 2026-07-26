@@ -534,7 +534,15 @@ class ServerConfig(BaseModel):
     """Configuration for the pyzm ML detection server (``pyzm.serve``)."""
     host: str = "0.0.0.0"
     port: int = 5000
-    models: list[str] = Field(default_factory=lambda: ["yolo11s"])
+    models: list[str] = Field(
+        default_factory=lambda: ["yolo11s"],
+        description=(
+            "Models to load. Each entry is a model name, a weights path, or "
+            "'all' to auto-discover. An entry may be written as "
+            "'<published name>=<spec>' to serve a model under the name remote "
+            "clients ask for, e.g. 'YOLOv11 ONNX=yolo11s'."
+        ),
+    )
     base_path: str = "/var/lib/zmeventnotification/models"
     processor: Processor = Processor.CPU
     detector_config: DetectorConfig | None = None

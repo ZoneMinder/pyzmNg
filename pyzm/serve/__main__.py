@@ -20,7 +20,9 @@ def main() -> None:
         help=(
             "Model names to load (space-separated, default: yolo11s). "
             "Use 'all' to auto-discover every model in --base-path "
-            "(loaded lazily on first request)."
+            "(loaded lazily on first request). "
+            "Prefix an entry with 'published name=' to serve it under the name "
+            "a client asks for, e.g. --models 'YOLOv11 ONNX=yolo11s'."
         ),
     )
     ap.add_argument("--base-path", default="/var/lib/zmeventnotification/models")
