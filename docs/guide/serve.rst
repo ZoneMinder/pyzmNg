@@ -189,7 +189,7 @@ which sends requests to the remote ``pyzm.serve`` server over HTTP.
 
 .. code-block:: bash
 
-   pip install "pyzm[serve] @ git+https://github.com/ZoneMinder/pyzmNg.git@master"
+   pip install "pyzm[serve]"        # or "pyzm[full]" if this box also trains models
    python -m pyzm.serve --models all --processor gpu --port 5000
 
 Or with specific models and auth:
@@ -207,7 +207,7 @@ Or with specific models and auth:
 
 .. code-block:: bash
 
-   pip install "pyzm @ git+https://github.com/ZoneMinder/pyzmNg.git@master"
+   pip install pyzm
 
 **ZM box objectconfig.yml:**
 
@@ -353,8 +353,9 @@ the client's config:
 - Face recognition data: ``known_faces_dir``, ``unknown_faces_dir``, the trained
   encodings, and the face tuning parameters. Face recognition runs entirely on
   this box, matches against **this box's** encodings, and writes unknown-face
-  crops to **this box's** disk. Train faces on the server. Face results are
-  therefore the one thing that need not match a local run.
+  crops to **this box's** disk. Train faces on the server -- which needs the
+  ``[full]`` extra, not just ``[serve]``. Face results are therefore the one
+  thing that need not match a local run.
 
 
 ``--models all`` (lazy loading)
@@ -405,30 +406,37 @@ The ``[serve]`` extra automatically includes all ML dependencies.
 
 .. code-block:: bash
 
-   pip install "pyzm[serve] @ git+https://github.com/ZoneMinder/pyzmNg.git@master"
+   pip install "pyzm[serve]"
 
 Install into whichever environment will run the server. On a box that also runs
 ZoneMinder that is usually its virtualenv, e.g.
 ``/opt/zoneminder/venv/bin/pip``. A client-only box (the ZM machine in a split
 setup) needs plain ``pyzm``, without the ``[serve]`` extra.
 
+If this box will also **train** models -- YOLO fine-tuning, or the face
+recognition encodings, which must be built on the box that runs the face model
+-- install ``[full]`` instead. It is ``[ml]`` + ``[serve]`` + ``[train]``, so it
+covers the server as well:
+
+.. code-block:: bash
+
+   pip install "pyzm[full]"
+
 .. important::
 
-   ``pip install --upgrade`` compares versions, so it does nothing when the
-   installed copy reports the same ``__version__`` as the branch you are
-   installing -- you keep running the old code and the only symptom is a
-   missing endpoint. After upgrading, verify what actually landed:
+   A running server holds its code in memory, so **restart it** after an
+   upgrade. Otherwise the new version is on disk while the old one keeps
+   answering requests -- typically seen as an endpoint that 404s even though the
+   installed copy has it. Confirm which version is loaded with:
 
    .. code-block:: bash
 
       python -c "import pyzm; print(pyzm.__version__, pyzm.__file__)"
-      cat <site-packages>/pyzm-*.dist-info/direct_url.json   # commit you installed
 
-   If the version did not move, force it:
-   ``pip install --force-reinstall --no-deps "pyzm @ git+...@master"``.
-
-   A running server keeps the old code in memory, so **restart it** after any
-   upgrade.
+   Client and server should run the same pyzm version. A newer client sending
+   settings an older server does not understand (for example
+   ``min_confidence``) falls back to the server's own values, which quietly
+   changes results.
 
 
 CLI options
