@@ -5,6 +5,21 @@ Remote ML Detection Server
 and serves detection requests over HTTP. This lets you offload GPU-heavy
 inference to a dedicated machine.
 
+.. note::
+
+   **The server is a dumb inference engine.** It exposes a single
+   ``POST /infer`` endpoint that runs *one* model on *one* uploaded image and
+   returns raw detections. All orchestration -- the model sequence,
+   ``pre_existing_labels`` gating, and every filter (pattern, zone, size,
+   past-detection dedup) plus frame selection -- runs on the **client** using
+   your ``objectconfig.yml``. The server holds only model files and a processor
+   setting. This is what makes local and remote detection identical (the test
+   suite asserts local/remote parity). Two transports feed ``/infer``: **URL
+   mode** (default) sends a frame reference and the server fetches it from ZM;
+   **image mode** uploads the decoded frame as lossless PNG. URL mode needs
+   every enabled model to be gateway-run (a client-side model such as cloud
+   ALPR forces image mode for that event).
+
 .. code-block:: text
 
    URL mode (default)                     GPU box
@@ -525,10 +540,11 @@ Manual flow:
        -d '{"username":"admin","password":"secret"}' \
        | jq -r .access_token)
 
-   # Detect
-   curl -X POST http://gpu-box:5000/detect \
+   # Infer (one model, one image)
+   curl -X POST http://gpu-box:5000/infer \
        -H "Authorization: Bearer $TOKEN" \
-       -F file=@/path/to/image.jpg
+       -F image=@/path/to/image.png \
+       -F type=object
 
 Tokens expire after ``token_expiry_seconds`` (default 3600), configurable
 via the YAML config file.
@@ -561,51 +577,46 @@ Returns the list of available models and their load status. Useful with
      ]
    }
 
-``POST /detect``
-~~~~~~~~~~~~~~~~~
+``POST /infer``
+~~~~~~~~~~~~~~~~
 
-Run detection on an uploaded image (image mode).
+Run **one** model on **one** frame and return **raw, unfiltered** detections.
+The server does no filtering, no model-sequence orchestration and no frame
+selection -- the client's :class:`ModelPipeline` does all of that, so local and
+remote detection produce identical results.
 
 - **Content-Type:** ``multipart/form-data``
 - **Parameters:**
-  - ``file`` (required) -- JPEG/PNG image
-  - ``zones`` (optional) -- JSON string of zone list
+
+  - ``type`` (required) -- model type: ``object``, ``face``, ``alpr``, ``audio``
+  - ``name`` (optional) -- model name; when omitted the server uses its loaded
+    model of that ``type``
+  - **URL mode:** ``url`` (ZM image URL) + ``zm_auth`` (token) + ``verify_ssl``
+    (``"1"``/``"0"``) -- the server fetches the frame from ZM
+  - **Image mode:** ``image`` -- an uploaded frame (PNG lossless, or JPEG)
+
 - **Auth:** Bearer token (when auth enabled)
-- **Returns:** ``DetectionResult`` as JSON (image field excluded)
-
-``POST /detect_urls``
-~~~~~~~~~~~~~~~~~~~~~~
-
-Run detection on images fetched from URLs (URL mode).
-
-- **Content-Type:** ``application/json``
-- **Body:**
+- **Returns:**
 
   .. code-block:: json
 
      {
-       "urls": [
-         {"frame_id": "snapshot", "url": "https://zm.example.com/zm/index.php?view=image&eid=123&fid=snapshot"},
-         {"frame_id": "1", "url": "https://zm.example.com/zm/index.php?view=image&eid=123&fid=1"}
+       "detections": [
+         {"label": "person", "confidence": 0.93, "box": [10, 20, 50, 80],
+          "type": "object", "model_name": "yolo11s"}
        ],
-       "zm_auth": "token=abc123...",
-       "zones": [{"name": "driveway", "value": [[0,0],[100,0],[100,100],[0,100]]}],
-       "verify_ssl": false
+       "error": null
      }
 
-- **Auth:** Bearer token (when auth enabled)
-- **Returns:** ``DetectionResult`` as JSON (best frame selected by ``frame_strategy``)
-
-The server appends ``zm_auth`` to each URL and fetches the image via HTTP
-GET (10-second timeout per URL; failures are logged and skipped).
-Frame strategy (``first``, ``first_new``, ``most``, ``most_unique``,
-``most_models``) is applied server-side to pick the best result.
+  When the server has no model for the requested ``(type, name)``,
+  ``detections`` is empty and ``error`` explains why (the client logs it and
+  continues, like a local model that fails to load).
 
 .. note::
 
-   The ``zones`` field accepts both ``"value"`` and ``"points"`` as the key
-   for polygon coordinates (they are interchangeable in both ``/detect``
-   and ``/detect_urls``).
+   The client sends model **references** (``type``/``name``), never its config.
+   The server resolves them against its own loaded models. For local/remote
+   parity the server must have the models the client's config references.
 
 ``POST /login``
 ~~~~~~~~~~~~~~~~

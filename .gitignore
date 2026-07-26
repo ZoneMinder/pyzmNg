@@ -11,6 +11,7 @@ __pycache__/
 *.so
 *~
 .vscode/
+.codegraph/
 # due to using tox and pytest
 .tox
 .cache

@@ -339,7 +339,16 @@ def _seq_item_to_model_config(
     framework_key = f"{prefix}_framework"
     if prefix == "face":
         framework_key = "face_detection_framework"
-    default_fw = "birdnet" if mtype == ModelType.AUDIO else "opencv"
+    if mtype == ModelType.AUDIO:
+        default_fw = "birdnet"
+    elif mtype == ModelType.ALPR:
+        # ALPR sequences address the concrete framework via alpr_service
+        # (plate_recognizer / openalpr), not alpr_framework. Default from it
+        # so a documented ALPR entry doesn't silently fall back to opencv and
+        # get loaded as a YOLO/darknet model.
+        default_fw = "openalpr" if seq.get("alpr_service") == "openalpr" else "plate_recognizer"
+    else:
+        default_fw = "opencv"
     fw_raw = seq.get(framework_key, default_fw)
     try:
         fw = ModelFramework(fw_raw)
