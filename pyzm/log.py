@@ -51,6 +51,26 @@ def _python_to_zm(record: logging.LogRecord) -> str:
     return "FAT"
 
 
+_EXC_FORMATTER = logging.Formatter()
+
+
+def _message_text(record: logging.LogRecord) -> str:
+    """Message plus any traceback.
+
+    The ZM sinks below build their output from ``record.getMessage()`` rather
+    than ``Formatter.format()``, so without this every ``logger.exception()``
+    would reach ZM as a bare one-liner with the cause discarded.
+    """
+    parts = [record.getMessage()]
+    if record.exc_info:
+        if not record.exc_text:
+            record.exc_text = _EXC_FORMATTER.formatException(record.exc_info)
+        parts.append(record.exc_text)
+    if record.stack_info:
+        parts.append(_EXC_FORMATTER.formatStack(record.stack_info))
+    return "\n".join(parts)
+
+
 
 # ===================================================================
 # ZM-native logging -- replaces pyzm.ZMLog without SQLAlchemy
@@ -228,7 +248,7 @@ class _ZMDBHandler(logging.Handler):
                 (
                     time.time(), self._component, self._server_id,
                     os.getpid(), level_val, code,
-                    record.getMessage(),
+                    _message_text(record),
                     os.path.basename(record.pathname), record.lineno,
                 ),
             )
@@ -271,7 +291,7 @@ class _ZMFileFormatter(logging.Formatter):
         caller = f"{os.path.basename(record.pathname)}:{record.lineno}"
         return (
             f"{ts}.{usec:06d} {self._pname}[{os.getpid()}].{disp} "
-            f"[{caller}] [{record.getMessage()}]"
+            f"[{caller}] [{_message_text(record)}]"
         )
 
 
@@ -285,7 +305,7 @@ class _ZMSyslogFormatter(logging.Formatter):
         zm_code = _python_to_zm(record)
         dbg_lvl = getattr(record, "zm_debug_level", 1)
         disp = f"DB{dbg_lvl}" if zm_code == "DBG" else zm_code
-        return f"{disp} [{record.getMessage()}]"
+        return f"{disp} [{_message_text(record)}]"
 
 
 class ZMLogAdapter:

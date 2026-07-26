@@ -1120,3 +1120,62 @@ class TestGetLogFile:
             assert get_log_file() == str(debug_file)
         finally:
             adapter.close()
+
+
+# ===================================================================
+# TestExceptionText
+# ===================================================================
+
+class TestExceptionText:
+    """logger.exception() must reach every ZM sink with its traceback.
+
+    The sinks build their output from record.getMessage(), which drops
+    exc_info, so an unguarded implementation logs 'Error loading model X'
+    with no cause at all.
+    """
+
+    @staticmethod
+    def _record_with_exc():
+        try:
+            raise ValueError("plate key missing")
+        except ValueError:
+            import sys
+            return logging.LogRecord(
+                "test", logging.ERROR, "/path/to/pipeline.py", 153,
+                "Error loading model %s", ("Platerecognizer cloud",),
+                sys.exc_info(),
+            )
+
+    def test_file_formatter_includes_traceback(self):
+        result = _ZMFileFormatter("zmesdetect_m1").format(self._record_with_exc())
+        assert "Error loading model Platerecognizer cloud" in result
+        assert "ValueError: plate key missing" in result
+        assert "Traceback (most recent call last)" in result
+
+    def test_syslog_formatter_includes_traceback(self):
+        result = _ZMSyslogFormatter().format(self._record_with_exc())
+        assert "ValueError: plate key missing" in result
+
+    @patch("mysql.connector.connect")
+    def test_db_handler_includes_traceback(self, mock_connect):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value = mock_cursor
+        mock_connect.return_value = mock_conn
+
+        handler = _ZMDBHandler(
+            component="test", server_id=0,
+            host="localhost", user="u", password="p", database="zm",
+        )
+        handler.emit(self._record_with_exc())
+
+        message = mock_cursor.execute.call_args[0][1][6]
+        assert message.startswith("Error loading model Platerecognizer cloud")
+        assert "ValueError: plate key missing" in message
+        handler.close()
+
+    def test_plain_record_is_unchanged(self):
+        record = logging.LogRecord(
+            "test", logging.INFO, "test.py", 1, "hello %s", ("world",), None,
+        )
+        assert _ZMSyslogFormatter().format(record) == "INF [hello world]"
