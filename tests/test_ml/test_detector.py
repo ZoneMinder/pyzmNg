@@ -1607,7 +1607,7 @@ class TestRemoteInference:
         zm.monitor.return_value = mon
 
         seen = []
-        def fake_infer(self, image, t, n):
+        def fake_infer(self, image, t, n, min_confidence=None):
             seen.append((t, self.current_frame["url"]))
             return []
         with patch.object(GatewayClient, "infer", fake_infer):
@@ -1617,6 +1617,35 @@ class TestRemoteInference:
         assert seen[0][0] == "object"
         assert "eid=42" in seen[0][1] and "fid=snapshot" in seen[0][1]
         assert "fid=alarm" in seen[1][1]
+
+    def test_url_mode_declines_when_resize_configured(self):
+        """A configured resize forces image mode, so local and remote agree.
+
+        In URL mode the gateway fetches frames straight from ZM at full size --
+        it never sees stream_sequence.resize. Staying in URL mode would infer on
+        full-resolution pixels remotely and resized pixels locally.
+        """
+        from pyzm.ml.detector import Detector
+        from pyzm.ml.remote import GatewayClient
+        from pyzm.models.config import DetectorConfig, StreamConfig
+
+        cfg = DetectorConfig.from_dict({
+            "general": {"model_sequence": "object", "same_model_sequence_strategy": "first"},
+            "object": {"general": {}, "sequence": [{"name": "o", "object_framework": "opencv"}]},
+        })
+        det = Detector(config=cfg, gateway="http://gpu:5000", gateway_mode="url")
+
+        zm = MagicMock()
+        zm.api.portal_url = "http://zm"
+        ev = MagicMock(); ev.monitor_id = 5
+        ev.extract_frames.return_value = ([], {})
+        zm.event.return_value = ev
+
+        with patch.object(GatewayClient, "infer", lambda *a, **k: []):
+            det.detect_event(zm, 42, stream_config=StreamConfig(resize=800))
+
+        # Frames were downloaded locally (image mode) instead of URL mode.
+        ev.extract_frames.assert_called_once()
 
     def test_gateway_missing_model_warns_and_skips(self, caplog):
         """Gateway lacking a model -> one WARNING, that model skipped, others run."""
@@ -1634,7 +1663,7 @@ class TestRemoteInference:
             "face": {"general": {"pattern": ".*"}, "sequence": [{"name": "f", "face_detection_framework": "dlib"}]},
         })
 
-        def infer(self, image, t, n):
+        def infer(self, image, t, n, min_confidence=None):
             if t == "face":
                 raise GatewayModelError("no model loaded for type=face name='f'")
             return [Detection("person", 0.9, BBox(1, 1, 5, 5), "o", "object")]

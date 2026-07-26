@@ -447,11 +447,20 @@ class Detector:
         if self._gateway and self._gateway_mode == "url":
             from pyzm.ml.pipeline import REMOTE_CAPABLE_FRAMEWORKS
             enabled = [mc for mc in self._config.models if mc.enabled]
-            if enabled and all(mc.framework in REMOTE_CAPABLE_FRAMEWORKS for mc in enabled):
+            if sc.resize:
+                # The gateway fetches frames straight from ZM at full size, so a
+                # configured resize could not be applied -- remote would infer on
+                # different pixels than local. Download and upload instead.
+                logger.info(
+                    "URL mode: stream resize=%s is set; downloading frames locally "
+                    "so local and remote see the same pixels.", sc.resize,
+                )
+            elif enabled and all(mc.framework in REMOTE_CAPABLE_FRAMEWORKS for mc in enabled):
                 return self._detect_event_url(zm_client, event_id, zones, sc)
-            logger.info(
-                "URL mode: a client-side model is enabled; downloading frames locally."
-            )
+            else:
+                logger.info(
+                    "URL mode: a client-side model is enabled; downloading frames locally."
+                )
 
         # Get Event object and extract frames via OOP API
         ev = zm_client.event(event_id)

@@ -72,7 +72,9 @@ def _run_local(cfg, img):
 def _run_remote(cfg, img, zones=None):
     # Real RemoteInferenceBackend is used (object=opencv is remote-capable);
     # only the network call is stubbed to return the same RAW detections.
-    with patch.object(GatewayClient, "infer", lambda self, image, t, n: list(RAW)):
+    with patch.object(
+        GatewayClient, "infer", lambda self, image, t, n, min_confidence=None: list(RAW)
+    ):
         pipe = ModelPipeline(cfg, gateway_client=GatewayClient("http://gpu:5000"))
         pipe.load()
         return pipe.run(img, zones=zones)
@@ -193,7 +195,8 @@ def test_parity_multitype_object_face_alpr():
     # Remote: object+face become real RemoteInferenceBackend (HTTP stubbed);
     # alpr stays local via the patched _create_backend.
     with patch("pyzm.ml.pipeline._create_backend", lambda mc: _TypedFake(mc.type.value)), \
-         patch.object(GatewayClient, "infer", lambda self, image, t, n: list(RAW_BY_TYPE.get(t, []))):
+         patch.object(GatewayClient, "infer",
+                      lambda self, image, t, n, min_confidence=None: list(RAW_BY_TYPE.get(t, []))):
         rp = ModelPipeline(cfg, gateway_client=GatewayClient("http://gpu:5000"))
         rp.load()
         remote = rp.run(img)
@@ -208,7 +211,7 @@ def test_parity_alpr_never_sent_remote():
     cfg = _multitype_cfg()
     seen_types = []
 
-    def spy_infer(self, image, t, n):
+    def spy_infer(self, image, t, n, min_confidence=None):
         seen_types.append(t)
         return list(RAW_BY_TYPE.get(t, []))
 
@@ -256,8 +259,37 @@ def test_parity_multiframe_frame_strategy():
     with patch("pyzm.ml.pipeline._create_backend", lambda mc: _CountFake()):
         local = Detector(config=cfg).detect(list(frames))
 
-    with patch.object(GatewayClient, "infer", lambda self, image, t, n: dets_for(image)):
+    with patch.object(
+        GatewayClient, "infer",
+        lambda self, image, t, n, min_confidence=None: dets_for(image),
+    ):
         remote = Detector(config=cfg, gateway="http://gpu:5000").detect(list(frames))
 
     assert local.frame_id == remote.frame_id == "f2"
     assert _key(local) == _key(remote)
+
+
+def test_client_min_confidence_is_sent_to_gateway():
+    """min_confidence is a client decision, so it must travel with the request.
+
+    Without this the gateway silently applies whatever threshold it was started
+    with, and a config that detects locally returns nothing remotely.
+    """
+    cfg = DetectorConfig.from_dict({
+        "general": {"model_sequence": "object", "same_model_sequence_strategy": "first"},
+        "object": {"general": {"object_min_confidence": 0.15},
+                   "sequence": [{"name": "m", "object_framework": "opencv",
+                                 "object_min_confidence": 0.15}]},
+    })
+    sent = {}
+
+    def _capture(self, image, t, n, min_confidence=None):
+        sent["min_confidence"] = min_confidence
+        return list(RAW)
+
+    with patch.object(GatewayClient, "infer", _capture):
+        pipe = ModelPipeline(cfg, gateway_client=GatewayClient("http://gpu:5000"))
+        pipe.load()
+        pipe.run(np.zeros((100, 100, 3), dtype=np.uint8))
+
+    assert sent["min_confidence"] == 0.15

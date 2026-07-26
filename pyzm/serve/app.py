@@ -8,6 +8,7 @@ pyzm.ml.remote). This is what keeps local and remote detection identical.
 """
 
 from __future__ import annotations
+import copy as _copy
 import logging
 from collections import OrderedDict
 from contextlib import asynccontextmanager
@@ -139,21 +140,21 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         return {"models": result}
 
     def _find_backend(pipeline, mtype: str, name: str):
-        """Return the loaded backend matching (type, optional name), or None."""
+        """Return the loaded backend matching (type, optional name), or None.
+
+        An unnamed request takes the first loaded model of that type. A *named*
+        request must match exactly: substituting a different model would answer
+        with detections the client never asked for, and it would look like a
+        successful run.
+        """
         if pipeline is None:
             return None
-        # name is a preference: exact (type,name) wins; otherwise fall back to
-        # the first loaded model of that type (server model names need not equal
-        # the client's config names).
-        fallback = None
         for mc, backend in pipeline._backends:
             if mc.type.value != mtype:
                 continue
-            if name and (mc.name or "") == name:
+            if not name or (mc.name or "") == name:
                 return backend
-            if fallback is None:
-                fallback = backend
-        return fallback
+        return None
 
     # Tiny decoded-frame cache keyed by URL so multiple models on the same
     # frame (URL mode) fetch+decode it once. Bounded; transparent optimization.
@@ -185,11 +186,16 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         url: str = Form(""),
         zm_auth: str = Form(""),
         verify_ssl: str = Form("1"),
+        min_confidence: float = Form(None),
     ):
         """Run ONE model on ONE frame, return raw (unfiltered) detections.
 
         URL mode: `url` set -> the server fetches the frame from ZM.
         Image mode: `image` uploaded -> inference on the uploaded frame.
+
+        `min_confidence` is owned by the client: when sent it replaces the
+        threshold this server loaded the model with, so one config drives both
+        local and remote runs. Omitted (an older client) keeps the server's.
         """
         import cv2
         import numpy as np
@@ -213,6 +219,14 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
         backend = _find_backend(detector._pipeline, type, name)
         if backend is None:
             return {"detections": [], "error": f"no model loaded for type={type} name={name!r}"}
+
+        if min_confidence is not None and min_confidence != backend._config.min_confidence:
+            # Shallow copy so the request gets its own threshold while sharing
+            # the loaded weights; never mutate the backend other requests use.
+            backend = _copy.copy(backend)
+            backend._config = backend._config.model_copy(
+                update={"min_confidence": min_confidence}
+            )
 
         try:
             detections = backend.detect(frame)

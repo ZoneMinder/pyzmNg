@@ -218,3 +218,87 @@ class TestInfer:
         )
         assert resp.status_code == 200
         assert resp.json()["error"] == "boom"
+
+    def test_infer_named_model_miss_is_an_error(self, client):
+        """A named request must not be answered by a different model.
+
+        The server loads 'yolov4'; a client asking for 'yolo11s' wants that
+        model's results. Substituting the loaded one returns detections the
+        client never asked for, and looks like a successful run.
+        """
+        resp = client.post(
+            "/infer",
+            files={"image": ("f.jpg", self._jpeg(), "image/jpeg")},
+            data={"type": "object", "name": "yolo11s"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["detections"] == []
+        assert "yolo11s" in data["error"]
+
+
+class TestClientOwnedThreshold:
+    """min_confidence travels with the request and beats the server's value."""
+
+    @staticmethod
+    def _jpeg():
+        import cv2
+        import numpy as np
+        ok, buf = cv2.imencode(".jpg", np.zeros((20, 20, 3), dtype=np.uint8))
+        assert ok
+        return buf.tobytes()
+
+    @pytest.fixture
+    def client_with_real_config(self):
+        """TestClient whose backend carries a real ModelConfig (min_confidence=0.9)."""
+        from pyzm.models.config import ModelConfig
+
+        seen = {}
+
+        class _Backend:
+            def __init__(self):
+                self._config = ModelConfig(name="yolov4", min_confidence=0.9)
+
+            def detect(self, image):
+                seen["min_confidence"] = self._config.min_confidence
+                return [Detection("person", 0.5, BBox(1, 2, 3, 4), "yolov4", "object")]
+
+        backend = _Backend()
+        mc = MagicMock()
+        mc.type.value = "object"
+        mc.name = "yolov4"
+
+        det = MagicMock()
+        pipeline = MagicMock()
+        pipeline._backends = [(mc, backend)]
+        det._pipeline = pipeline
+        det._ensure_pipeline = MagicMock()
+
+        with patch("pyzm.serve.app.Detector") as MockDetector:
+            MockDetector.return_value = det
+            from pyzm.serve.app import create_app
+            from fastapi.testclient import TestClient
+            with TestClient(create_app(ServerConfig(models=["yolov4"]))) as tc:
+                yield tc, backend, seen
+
+    def test_client_value_replaces_server_value(self, client_with_real_config):
+        tc, backend, seen = client_with_real_config
+        resp = tc.post(
+            "/infer",
+            files={"image": ("f.jpg", self._jpeg(), "image/jpeg")},
+            data={"type": "object", "name": "yolov4", "min_confidence": "0.15"},
+        )
+        assert resp.status_code == 200
+        assert seen["min_confidence"] == 0.15
+        # the shared backend keeps its own threshold for other requests
+        assert backend._config.min_confidence == 0.9
+
+    def test_omitted_keeps_server_value(self, client_with_real_config):
+        tc, backend, seen = client_with_real_config
+        resp = tc.post(
+            "/infer",
+            files={"image": ("f.jpg", self._jpeg(), "image/jpeg")},
+            data={"type": "object", "name": "yolov4"},
+        )
+        assert resp.status_code == 200
+        assert seen["min_confidence"] == 0.9

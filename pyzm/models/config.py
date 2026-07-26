@@ -461,10 +461,10 @@ class StreamConfig(BaseModel):
     stop_on_match: bool = Field(
         default=True,
         description=(
-            "When True and operating in remote-gateway URL mode, the gateway stops "
-            "processing frames as soon as it finds a detection that passes all "
-            "server-side filters (confidence, pattern and zone). Set to False to "
-            "process all frames regardless of early matches. "
+            "When True and operating in remote-gateway URL mode, frame processing "
+            "stops as soon as a frame produces a match. Filtering itself is always "
+            "client-side; the gateway only runs inference. Set to False to process "
+            "all frames regardless of early matches. "
             "Only relevant when ml_gateway and ml_gateway_mode=url are set."
         ),
     )

@@ -77,15 +77,27 @@ class GatewayClient:
         self._token = resp.json().get("access_token")
         return {"Authorization": f"Bearer {self._token}"} if self._token else {}
 
-    def infer(self, image: "np.ndarray", mtype: str, name: str) -> list[Detection]:
+    def infer(
+        self,
+        image: "np.ndarray",
+        mtype: str,
+        name: str,
+        min_confidence: float | None = None,
+    ) -> list[Detection]:
         """Run one model on one frame on the gateway, return raw detections.
 
         URL mode (``current_frame`` set): send a ZM frame reference and let the
         gateway fetch it. Image mode: upload the decoded frame as lossless PNG
         (identical pixels -> exact local<->remote parity).
+
+        ``min_confidence`` is a client-owned decision: the gateway applies the
+        value we send instead of whatever its own copy of the model was loaded
+        with, so the same config threshold applies locally and remotely.
         """
         frame = self.current_frame
         data = {"type": mtype, "name": name or ""}
+        if min_confidence is not None:
+            data["min_confidence"] = str(min_confidence)
         files = None
         if frame:
             data["url"] = frame["url"]
@@ -144,4 +156,9 @@ class RemoteInferenceBackend(MLBackend):
         return True
 
     def detect(self, image: "np.ndarray") -> list[Detection]:
-        return self._client.infer(image, self._config.type.value, self._config.name or "")
+        return self._client.infer(
+            image,
+            self._config.type.value,
+            self._config.name or "",
+            min_confidence=self._config.min_confidence,
+        )
