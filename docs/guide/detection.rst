@@ -322,11 +322,13 @@ Architecture overview
 sequences the configured backends, applies match strategies, and runs
 post-detection filters.
 
-When ``gateway`` is set, ``Detector`` skips local inference and sends
-requests to a remote ``pyzm.serve`` server instead.  By default (URL
-mode), ``detect_event()`` sends frame URLs and the server fetches
-images directly from ZoneMinder.  Set ``gateway_mode="image"`` if the
-server cannot reach ZM (see the :doc:`serve guide </guide/serve>`).
+When ``gateway`` is set, ``Detector`` sends inference for **remote-capable**
+models (YOLO, Coral TPU, local face) to a remote ``pyzm.serve`` server;
+cloud ALPR, AWS Rekognition and audio still run locally. Sequencing and all
+filtering stay local either way.  By default (URL mode), ``detect_event()``
+sends frame URLs and the server fetches images directly from ZoneMinder.  Set
+``gateway_mode="image"`` if the server cannot reach ZM (see the
+:doc:`serve guide </guide/serve>`).
 
 
 Configuration

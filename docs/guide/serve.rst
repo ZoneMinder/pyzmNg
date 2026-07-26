@@ -8,17 +8,20 @@ inference to a dedicated machine.
 .. note::
 
    **The server is a dumb inference engine.** It exposes a single
-   ``POST /infer`` endpoint that runs *one* model on *one* uploaded image and
-   returns raw detections. All orchestration -- the model sequence,
+   ``POST /infer`` endpoint that runs *one* model on *one* frame and returns
+   raw detections. All orchestration -- the model sequence,
    ``pre_existing_labels`` gating, and every filter (pattern, zone, size,
    past-detection dedup) plus frame selection -- runs on the **client** using
-   your ``objectconfig.yml``. The server holds only model files and a processor
-   setting. This is what makes local and remote detection identical (the test
-   suite asserts local/remote parity). Two transports feed ``/infer``: **URL
-   mode** (default) sends a frame reference and the server fetches it from ZM;
-   **image mode** uploads the decoded frame as lossless PNG. URL mode needs
-   every enabled model to be gateway-run (a client-side model such as cloud
-   ALPR forces image mode for that event).
+   your ``objectconfig.yml``, which also supplies the detection threshold with
+   each request. The server holds only model files and a processor setting.
+   This is what makes local and remote **object** detection identical (the test
+   suite asserts local/remote parity); face recognition runs against the
+   server's own encodings and is the exception. Two transports feed ``/infer``:
+   **URL mode** (default) sends a frame reference and the server fetches it
+   from ZM; **image mode** uploads the decoded frame as lossless PNG. URL mode
+   needs every enabled model to be gateway-run and no ``resize`` in
+   ``stream_sequence`` (a client-side model such as cloud ALPR, or a resize,
+   forces image mode for that event).
 
 .. code-block:: text
 
@@ -34,7 +37,7 @@ inference to a dedicated machine.
                                          +------------------+
 
    Image mode (gateway_mode="image")      GPU box
-   +-----------------+     HTTP/JPEG     +------------------+
+   +-----------------+     HTTP/PNG      +------------------+
    | zm_detect.py    | ----------------> | pyzm.serve       |
    | Detector(       |                   |   YOLO11 (GPU)  |
    |   gateway=...,  | <---------------- |   Coral TPU      |
@@ -42,14 +45,15 @@ inference to a dedicated machine.
    |     "image")    |
    +-----------------+
 
-Two detection modes are available:
+Both modes post to the same ``/infer`` endpoint; they differ only in how the
+frame gets there:
 
-- **URL mode** (default) -- the client sends frame URLs to the
-  ``/detect_urls`` endpoint and the *server* fetches images directly from
-  ZoneMinder.  This avoids transferring every frame through the client.
-- **Image mode** -- the client fetches frames from ZM, JPEG-encodes them,
-  and uploads each one to the ``/detect`` endpoint.  Use this when the
-  server cannot reach ZoneMinder directly.
+- **URL mode** (default) -- the client sends a frame URL plus a ZM auth token
+  and the *server* fetches the image directly from ZoneMinder. This avoids
+  transferring every frame through the client.
+- **Image mode** -- the client fetches frames from ZM and uploads each one as
+  lossless PNG. Use this when the server cannot reach ZoneMinder directly, or
+  when a ``resize`` means the server must not fetch full-size frames itself.
 
 .. list-table:: URL mode vs Image mode trade-offs
    :header-rows: 1
@@ -63,7 +67,7 @@ Two detection modes are available:
      - Only client needs ZM access
    * - Bandwidth
      - Low — client sends only URLs
-     - Higher — client uploads JPEG per frame
+     - Higher — client uploads a PNG per frame
    * - Latency
      - Server fetches from ZM (one extra hop)
      - Single client → server transfer
@@ -81,12 +85,21 @@ Two detection modes are available:
 **When to choose Image mode:**
 Use Image mode when the GPU server cannot reach the ZoneMinder API
 directly (e.g., server is in the cloud, or firewall rules prevent it).
-The client handles frame fetching and uploads JPEG images to ``/detect``.
+The client handles frame fetching and uploads lossless PNGs.
 
 **When to stay with URL mode (default):**
 Use URL mode when the server and ZoneMinder are on the same network.
 This minimises bandwidth on the client side and lets the server fetch
 only the frames it needs.
+
+**Automatic fallback to image mode.** Two situations switch a single event to
+image mode and log the reason:
+
+- A client-side model is enabled (cloud ALPR, AWS Rekognition, audio). Those
+  need local pixels, so the frames are downloaded anyway.
+- ``stream_sequence.resize`` is set. The server fetches frames from ZM at full
+  resolution and never sees the resize, so staying in URL mode would run
+  inference on different pixels than a local run.
 
 
 Deployment scenarios
@@ -176,7 +189,7 @@ which sends requests to the remote ``pyzm.serve`` server over HTTP.
 
 .. code-block:: bash
 
-   pip install pyzm[serve]
+   pip install "pyzm[serve] @ git+https://github.com/ZoneMinder/pyzmNg.git@master"
    python -m pyzm.serve --models all --processor gpu --port 5000
 
 Or with specific models and auth:
@@ -184,33 +197,51 @@ Or with specific models and auth:
 .. code-block:: bash
 
    python -m pyzm.serve \
-       --models yolo11s yolo26s \
+       --models "YOLO11s=yolo11s" yolo26s \
        --processor gpu \
        --port 5000 \
        --auth --auth-user admin --auth-password secret \
        --token-secret my-jwt-secret
 
+**ZM box** -- install the client without the ``serve`` extra:
+
+.. code-block:: bash
+
+   pip install "pyzm @ git+https://github.com/ZoneMinder/pyzmNg.git@master"
+
 **ZM box objectconfig.yml:**
 
 .. code-block:: yaml
+
+   remote:
+     ml_gateway: "http://192.168.1.100:5000"
+     ml_gateway_mode: "url"          # "image" if the server can't reach ZM
+     ml_fallback_local: "yes"
+     ml_timeout: 60
 
    ml:
      ml_sequence:
        general:
          model_sequence: "object"
-         ml_gateway: "http://192.168.1.100:5000"
-         # ml_gateway_mode: "image"   # uncomment if server can't reach ZM directly
-         ml_fallback_local: "yes"
        object:
          general:
            pattern: "(person|car)"
          sequence:
-           - object_framework: opencv
+           - name: "YOLO11s"
+             object_framework: opencv
              object_weights: "/var/lib/zmeventnotification/models/ultralytics/yolo11s.onnx"
+             object_min_confidence: 0.5
 
 By default, URL mode is used -- the server fetches frames directly from ZM.
 Set ``ml_gateway_mode: "image"`` if the server cannot reach ZoneMinder
-(the client will JPEG-encode and upload frames instead).
+(the client then uploads lossless PNGs instead).
+
+Note how the two sides line up: the sequence entry is named ``YOLO11s`` and the
+server publishes ``"YOLO11s=yolo11s"``, so the name the client asks for exists
+on the gateway. ``object_min_confidence`` stays on the ZM box -- it is sent with
+each request. ``object_weights`` is used only if this event falls back to local
+detection; for a remote run the gateway's own copy of the model is what loads,
+so point the published name at equivalent weights.
 
 
 Available models
@@ -223,6 +254,9 @@ Model names passed via ``--models`` (or ``Detector(models=[...])``) are
 resolved against ``--base-path`` on disk. There are no hardcoded presets --
 any name you pass is looked up as follows:
 
+0. **Published name** -- an entry written ``<published name>=<spec>`` loads
+   *spec* by the rules below but registers it under *published name*. See
+   :ref:`serve-model-names`.
 1. **Directory match** -- ``base_path/<name>/`` containing a weight file
 2. **File stem match** -- any ``<name>.onnx``, ``<name>.weights``, or
    ``<name>.tflite`` in any subdirectory of ``base_path``
@@ -239,6 +273,88 @@ discovered automatically.
 
 The ``--processor`` flag (``cpu``, ``gpu``, ``tpu``) applies to all
 discovered models (except ``.tflite`` which always uses ``tpu``).
+
+
+.. _serve-model-names:
+
+Matching model names with the client
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**A client asks for a model by name.** The ``name`` of each entry in the
+client's sequence must match a name this server publishes. A name the server
+has not loaded is reported as an error and that model is skipped -- the server
+never substitutes a different model, because answering with one the client did
+not ask for looks like success while returning the wrong detections.
+
+Check what a running server publishes:
+
+.. code-block:: bash
+
+   curl -s http://gpu-box:5000/models | python3 -m json.tool
+
+To serve a model under the name the client uses, write the entry as
+``<published name>=<spec>``. The server loads *spec* and answers to *published
+name*, so no weight files are renamed:
+
+.. code-block:: bash
+
+   python -m pyzm.serve --models "YOLOv11 ONNX=yolo11l"
+
+The same syntax works in a YAML config file:
+
+.. code-block:: yaml
+
+   models:
+     - "YOLOv11 ONNX=yolo11l"
+     - "TPU face detection=ssd_mobilenet_v2_face_quant_postprocess_edgetpu"
+
+Use ``detector_config`` instead when you want to spell out every field of a
+model rather than let the resolver find it:
+
+.. code-block:: yaml
+
+   detector_config:
+     models:
+       - name: "YOLOv11 ONNX"
+         type: object
+         framework: opencv
+         weights: "/var/lib/zmeventnotification/models/ultralytics/yolo11l.onnx"
+
+.. warning::
+
+   Matching the *name* is enforced; matching the *weights* is not. Publishing
+   ``yolo11s`` under a name the client's config points at ``yolo11l`` is
+   accepted and runs, but the smaller model scores differently -- detections
+   that pass the client's threshold locally can fall below it remotely, with no
+   error anywhere. For exact local/remote parity, point the published name at
+   the same weights the client would load.
+
+
+Which side owns which setting
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Every setting has exactly one owner; there is no merging and no overriding.
+
+**The client owns the outcome** -- sent with each request or applied to the
+returned detections, so it is identical local and remote:
+
+- ``min_confidence`` (sent on the ``/infer`` call and applied in place of the
+  value this server loaded the model with)
+- ``pattern``, zones, ``max_detection_size``
+- ``model_sequence``, ``same_model_sequence_strategy``, ``frame_strategy``
+- past-detection filtering and ``pre_existing_labels`` gating
+
+**The server owns the machine** -- never sent by the client, never derived from
+the client's config:
+
+- ``weights``, ``config``, ``labels`` and ``--base-path``. Paths never cross the
+  wire in either direction; a client path is meaningless here.
+- ``--processor`` (cpu/gpu/tpu) and the model input dimensions.
+- Face recognition data: ``known_faces_dir``, ``unknown_faces_dir``, the trained
+  encodings, and the face tuning parameters. Face recognition runs entirely on
+  this box, matches against **this box's** encodings, and writes unknown-face
+  crops to **this box's** disk. Train faces on the server. Face results are
+  therefore the one thing that need not match a local run.
 
 
 ``--models all`` (lazy loading)
@@ -289,7 +405,30 @@ The ``[serve]`` extra automatically includes all ML dependencies.
 
 .. code-block:: bash
 
-   pip install "pyzm[serve]"
+   pip install "pyzm[serve] @ git+https://github.com/ZoneMinder/pyzmNg.git@master"
+
+Install into whichever environment will run the server. On a box that also runs
+ZoneMinder that is usually its virtualenv, e.g.
+``/opt/zoneminder/venv/bin/pip``. A client-only box (the ZM machine in a split
+setup) needs plain ``pyzm``, without the ``[serve]`` extra.
+
+.. important::
+
+   ``pip install --upgrade`` compares versions, so it does nothing when the
+   installed copy reports the same ``__version__`` as the branch you are
+   installing -- you keep running the old code and the only symptom is a
+   missing endpoint. After upgrading, verify what actually landed:
+
+   .. code-block:: bash
+
+      python -c "import pyzm; print(pyzm.__version__, pyzm.__file__)"
+      cat <site-packages>/pyzm-*.dist-info/direct_url.json   # commit you installed
+
+   If the version did not move, force it:
+   ``pip install --force-reinstall --no-deps "pyzm @ git+...@master"``.
+
+   A running server keeps the old code in memory, so **restart it** after any
+   upgrade.
 
 
 CLI options
@@ -432,13 +571,13 @@ Using the ``Detector`` API:
 URL mode only applies to ``detect_event()`` calls.  Single-image
 ``detect()`` calls always upload the image regardless of this setting.
 
-URL mode: frame selection, retry, and short-circuit
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+URL mode: frame selection and short-circuit
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In URL mode the following ``StreamConfig`` (``stream_sequence``) fields
-control which frames are analysed and how the gateway processes them.
-They are forwarded to the server as part of the request. All are optional
-and default to backwards-compatible behaviour.
+In URL mode the client builds the frame list from ``StreamConfig``
+(``stream_sequence``) and sends the server one frame reference per ``/infer``
+call. The server has no notion of an event, a frame list, or a retry policy --
+it fetches the one URL it was given.
 
 **Frame selection** -- how the list of frames to analyse is built:
 
@@ -457,33 +596,17 @@ and default to backwards-compatible behaviour.
 Existing installations that do not explicitly set ``frame_set: []`` are
 unaffected.
 
-**Retry for live events** -- when detection starts while frames are still
-being written to disk, the gateway retries missing frames (HTTP 404):
+.. note::
 
-.. list-table::
-   :header-rows: 1
-   :widths: 30 12 58
+   ``max_attempts``, ``sleep_between_attempts`` and
+   ``contig_frames_before_error`` apply to the **client's** frame download, so
+   they take effect in image mode only. In URL mode nothing is downloaded on
+   the client, and the server does not retry a frame it cannot fetch -- that
+   ``/infer`` call returns an ``error`` and the client moves on.
 
-   * - Field
-     - Default
-     - Description
-   * - ``max_attempts``
-     - ``1``
-     - How many times the gateway fetches a 404 frame before treating it as
-       missing (``1`` = no retry).
-   * - ``sleep_between_attempts``
-     - ``3``
-     - Seconds to wait between retry attempts for a missing frame.
-   * - ``contig_frames_before_error``
-     - ``5``
-     - Stop processing after this many **consecutive** missing frames
-       (end-of-event detection). The counter resets on any frame fetched
-       successfully.
-
-**Short-circuit** -- ``stop_on_match`` (default ``True``) lets the gateway
-stop as soon as one frame produces a detection that passes all server-side
-filters (confidence, pattern, and zone), avoiding inference on the
-remaining frames.
+**Short-circuit** -- ``stop_on_match`` (default ``True``) stops the client
+requesting further frames once one frame produces a match. Filtering is always
+client-side; the server only runs inference.
 
 .. note::
 
@@ -580,17 +703,23 @@ Returns the list of available models and their load status. Useful with
 ``POST /infer``
 ~~~~~~~~~~~~~~~~
 
-Run **one** model on **one** frame and return **raw, unfiltered** detections.
-The server does no filtering, no model-sequence orchestration and no frame
-selection -- the client's :class:`ModelPipeline` does all of that, so local and
-remote detection produce identical results.
+Run **one** model on **one** frame and return detections that have had no
+filtering applied beyond the requested ``min_confidence``. The server does no
+pattern, zone, size or past-detection filtering, no model-sequence
+orchestration and no frame selection -- the client's :class:`ModelPipeline`
+does all of that, so local and remote object detection produce identical
+results.
 
 - **Content-Type:** ``multipart/form-data``
 - **Parameters:**
 
   - ``type`` (required) -- model type: ``object``, ``face``, ``alpr``, ``audio``
-  - ``name`` (optional) -- model name; when omitted the server uses its loaded
-    model of that ``type``
+  - ``name`` (optional) -- model name. Omitted, the server uses its first loaded
+    model of that ``type``. Given, it must match a published name exactly; an
+    unknown name is an error, never a substitution.
+  - ``min_confidence`` (optional) -- replaces the threshold this server loaded
+    the model with, so the client's configured value applies. Omitted (an older
+    client), the server's own value is used.
   - **URL mode:** ``url`` (ZM image URL) + ``zm_auth`` (token) + ``verify_ssl``
     (``"1"``/``"0"``) -- the server fetches the frame from ZM
   - **Image mode:** ``image`` -- an uploaded frame (PNG lossless, or JPEG)
@@ -614,9 +743,11 @@ remote detection produce identical results.
 
 .. note::
 
-   The client sends model **references** (``type``/``name``), never its config.
-   The server resolves them against its own loaded models. For local/remote
-   parity the server must have the models the client's config references.
+   The client sends model **references** (``type``/``name``) plus the settings
+   it owns, never file paths and never its whole config. The server resolves the
+   reference against its own loaded models. For local/remote parity the server
+   must publish the names the client's config references, backed by equivalent
+   weights -- see :ref:`serve-model-names`.
 
 ``POST /login``
 ~~~~~~~~~~~~~~~~
@@ -636,27 +767,43 @@ objectconfig.yml remote section
 In a ZoneMinder event notification setup, configure the remote gateway
 in ``objectconfig.yml``:
 
+The gateway keys live in their own top-level ``remote`` section, not inside
+``ml_sequence``:
+
 .. code-block:: yaml
 
-   ml_sequence:
-     general:
-       model_sequence: "object"
-       ml_gateway: "http://gpu-box:5000"
-       # ml_gateway_mode: "image"        # uncomment if server can't reach ZM
-       ml_user: "admin"
-       ml_password: "secret"
-       ml_fallback_local: yes
+   remote:
+     ml_gateway: "http://gpu-box:5000"
+     ml_gateway_mode: "url"            # "image" if the server can't reach ZM
+     ml_user: "admin"
+     ml_password: "secret"
+     ml_timeout: 60
+     ml_fallback_local: "yes"
 
-     object:
+   ml:
+     ml_sequence:
        general:
-         pattern: "(person|car)"
-       sequence:
-         - object_framework: opencv
-           object_weights: /path/to/yolo11s.onnx
-           object_labels: /path/to/coco.names
+         model_sequence: "object"
+       object:
+         general:
+           pattern: "(person|car)"
+         sequence:
+           - name: "YOLO11s"           # must match a name the server publishes
+             object_framework: opencv
+             object_weights: /path/to/yolo11s.onnx
+             object_labels: /path/to/coco.names
+             object_min_confidence: 0.5
 
 When ``ml_gateway`` is set, detection requests are sent to the remote
 server.  URL mode is the default -- the server fetches frames directly
 from ZM.  Set ``ml_gateway_mode: "image"`` if the server cannot reach
 ZoneMinder.  If ``ml_fallback_local`` is ``yes`` and the remote server
 is unreachable, detection falls back to local inference.
+
+While first setting a gateway up, use ``ml_fallback_local: "no"`` so a gateway
+problem fails loudly instead of quietly running locally and looking like it
+worked.
+
+The full ZoneMinder-side guide, including the ownership split and a
+troubleshooting table, is in the zmeventnotificationNg docs under
+*Using the remote ML detection server*.
