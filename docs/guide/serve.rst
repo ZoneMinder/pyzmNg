@@ -306,7 +306,7 @@ The same syntax works in a YAML config file:
 
    models:
      - "YOLOv11 ONNX=yolo11l"
-     - "TPU face detection=ssd_mobilenet_v2_face_quant_postprocess_edgetpu"
+     - "MobileDet=ssdlite_mobiledet_coco_qat_postprocess_edgetpu"
 
 .. warning::
 
@@ -350,13 +350,38 @@ Declaring models: two forms, and when each works
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **``models:`` (or ``--models``) is a filename shorthand.** Each entry is looked
-up on disk under ``base_path``, and both the *type* and the *framework* are
-inferred from the file that is found. It can therefore only express models that
-*have* a weights file: YOLO ONNX/Darknet, Coral TPU, TPU face detection.
+up on disk under ``base_path``, and the *type* and *framework* are then inferred
+from the file that was found:
 
-**``detector_config:`` declares models explicitly.** Use it whenever the type
-or framework cannot be inferred from a filename. This is **required**, not
-merely preferred, for:
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * - File found
+     - Registered as
+   * - ``<name>.onnx``
+     - ``type: object``, ``framework: opencv``
+   * - ``<name>.weights`` (+ ``.cfg``)
+     - ``type: object``, ``framework: opencv`` (Darknet)
+   * - ``<name>.tflite``
+     - ``type: object``, ``framework: coral_edgetpu``, ``processor: tpu``
+   * - *nothing*
+     - ``type: object``, ``framework: opencv``, ``weights: None`` -- broken
+
+Two consequences follow, and they explain why a gateway can serve YOLO happily
+while failing on everything else:
+
+- **A YOLO model needs nothing more than the shorthand.** ``yolo11l`` finds
+  ``yolo11l.onnx``, and the extension alone establishes both facts the server
+  needs. Nothing about that model has to be stated.
+- **The shorthand can only ever produce** ``type: object``. There is no branch
+  that yields ``face``, ``alpr`` or ``audio`` -- not even for a face-detection
+  ``.tflite``, which registers as ``object`` like any other Coral model. So a
+  face model named in ``models:`` is unreachable from a client's ``face``
+  sequence even when the names match perfectly.
+
+**``detector_config:`` declares models explicitly**, and is **required** --
+not merely preferred -- whenever the shorthand cannot express what you need:
 
 .. list-table::
    :header-rows: 1
@@ -366,19 +391,26 @@ merely preferred, for:
      - Why the shorthand cannot express it
    * - dlib face recognition
      - Has no weights file at all -- it is driven by ``known_faces_dir`` and the
-       ``faces.dat`` encodings trained from it.
-   * - Anything needing type ``face``
-     - The shorthand infers ``type: object`` from a weights file; it never
-       produces ``type: face`` except for a recognised TPU face model.
+       ``faces.dat`` encodings trained from it. Nothing on disk to match, and
+       nothing in a filename that says "face model, dlib framework".
+   * - TPU face detection
+     - The ``.tflite`` file exists, but it registers as ``type: object``. Only
+       an explicit declaration gives it ``type: face``.
    * - Cloud ALPR / Rekognition
      - Configured by API key, not by a local file. (These run client-side
        anyway and are never requested from a gateway.)
 
-A name in ``models:`` that matches no file on disk falls back to the
-``ModelConfig`` defaults -- ``type: object``, ``framework: opencv``,
-``weights: None`` -- which is almost never what you meant. Loading such a model
-now fails with an explicit error naming ``detector_config`` as the fix; the
-other models on the server are unaffected and keep serving.
+A name in ``models:`` that matches no file on disk lands in the last row of the
+first table: the ``ModelConfig`` defaults, with no weights. Loading it fails
+with an explicit error naming ``detector_config`` as the fix; the gateway's
+other models are unaffected and keep serving.
+
+.. note::
+
+   Older versions instead failed deep inside the OpenCV DNN loader with
+   ``(-2:Unspecified error) Cannot determine an origin framework of files`` and
+   a traceback through ``yolo_darknet.py`` -- confusing, because the model in
+   question had nothing to do with YOLO. If you see that, this is the cause.
 
 .. important::
 
