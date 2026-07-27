@@ -302,3 +302,68 @@ class TestClientOwnedThreshold:
         )
         assert resp.status_code == 200
         assert seen["min_confidence"] == 0.9
+
+
+class TestNonFileBackedModels:
+    """A models: entry that matches no weights file must fail loudly.
+
+    'DLIB face recognition' has no weight file of its own, so the plain
+    models list resolves it to the ModelConfig defaults -- type=object,
+    framework=opencv, weights=None -- and the OpenCV DNN loader then fails with
+    'cannot determine an origin framework', which says nothing about the real
+    mistake. It also registers under type=object, so a client asking for
+    type=face never finds it.
+    """
+
+    def test_unresolvable_name_raises_actionable_error(self, tmp_path):
+        from pyzm.ml.detector import _resolve_model_name
+        from pyzm.ml.pipeline import _create_backend
+
+        mc = _resolve_model_name("DLIB face recognition", tmp_path)
+        # the resolver still yields a config; creating the backend is what stops
+        assert mc.weights is None
+        with pytest.raises(ValueError) as exc:
+            _create_backend(mc)
+        assert "detector_config" in str(exc.value)
+
+    def test_one_bad_model_does_not_stop_the_others(self, tmp_path, caplog):
+        """The good model must still load and serve."""
+        import logging
+        from pyzm.ml.pipeline import ModelPipeline
+        from pyzm.models.config import DetectorConfig, ModelConfig, ModelFramework
+
+        cfg = DetectorConfig(models=[
+            ModelConfig(name="DLIB face recognition"),          # no weights
+            ModelConfig(name="good", framework=ModelFramework.FACE_DLIB,
+                        known_faces_dir=str(tmp_path)),
+        ])
+        pipe = ModelPipeline(cfg)
+        with patch("pyzm.ml.backends.face_dlib.FaceDlibBackend.load", lambda self: None):
+            with caplog.at_level(logging.ERROR, logger="pyzm.ml"):
+                pipe.load()
+
+        loaded = [mc.name for mc, _ in pipe._backends]
+        assert loaded == ["good"]
+        assert any("detector_config" in r.message + str(r.exc_info or "")
+                   or "detector_config" in r.getMessage() for r in caplog.records)
+
+    def test_detector_config_registers_face_model_under_face_type(self):
+        """A face model declared via detector_config is findable as type=face."""
+        from pyzm.models.config import DetectorConfig, ModelConfig, ModelFramework, ModelType
+
+        cfg = DetectorConfig(models=[
+            ModelConfig(name="DLIB face recognition", type=ModelType.FACE,
+                        framework=ModelFramework.FACE_DLIB,
+                        known_faces_dir="/var/lib/zmeventnotification/known_faces"),
+        ])
+        server_cfg = ServerConfig(detector_config=cfg)
+
+        with patch("pyzm.ml.backends.face_dlib.FaceDlibBackend.load", lambda self: None):
+            from pyzm.serve.app import create_app
+            from fastapi.testclient import TestClient
+            with TestClient(create_app(server_cfg)) as tc:
+                models = tc.get("/models").json()["models"]
+
+        assert [(m["name"], m["type"], m["framework"]) for m in models] == [
+            ("DLIB face recognition", "face", "face_dlib")
+        ]

@@ -199,9 +199,16 @@ def _resolve_model_spec(
                 if f.is_file() and f.stem == name and f.suffix.lower() in _WEIGHT_EXTS:
                     return _model_config_from_file(f, subdir, processor)
 
-    # 3. Fallback: bare config with no paths — will fail at load time
-    #    if the backend actually needs weight files.
-    logger.warning("Model '%s' not found in %s, creating bare config (no paths)", name, base_path)
+    # 3. Fallback: bare config with no paths — _create_backend rejects this for
+    #    any framework that needs weights, with a message naming the fix.
+    logger.warning(
+        "Model '%s' matched no weights file under %s. A plain model name is "
+        "resolved against disk, so this falls back to the defaults "
+        "(type=object, framework=opencv) and will fail to load. Models with no "
+        "weights file of their own (dlib face recognition, cloud ALPR) must be "
+        "declared under 'detector_config' with an explicit type and framework.",
+        name, base_path,
+    )
     return ModelConfig(name=name, processor=processor)
 
 

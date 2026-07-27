@@ -308,18 +308,6 @@ The same syntax works in a YAML config file:
      - "YOLOv11 ONNX=yolo11l"
      - "TPU face detection=ssd_mobilenet_v2_face_quant_postprocess_edgetpu"
 
-Use ``detector_config`` instead when you want to spell out every field of a
-model rather than let the resolver find it:
-
-.. code-block:: yaml
-
-   detector_config:
-     models:
-       - name: "YOLOv11 ONNX"
-         type: object
-         framework: opencv
-         weights: "/var/lib/zmeventnotification/models/ultralytics/yolo11l.onnx"
-
 .. warning::
 
    Matching the *name* is enforced; matching the *weights* is not. Publishing
@@ -328,6 +316,128 @@ model rather than let the resolver find it:
    that pass the client's threshold locally can fall below it remotely, with no
    error anywhere. For exact local/remote parity, point the published name at
    the same weights the client would load.
+
+
+.. _serve-correlation:
+
+How a client entry and a server model correlate
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The correlation key is the pair **(type, name)**, and nothing else. For every
+enabled model in its sequence, the client sends that pair; the server looks for
+a loaded model with the same pair and runs it, or returns an error.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 50 50
+
+   * - Client ``objectconfig.yml`` sequence entry
+     - Must exist on the server as
+   * - ``name: "YOLOv11 ONNX"`` in the ``object`` sequence
+     - a model published as name ``YOLOv11 ONNX``, type ``object``
+   * - ``name: "DLIB face recognition"`` in the ``face`` sequence
+     - a model published as name ``DLIB face recognition``, type ``face``
+
+The client's *type* comes from which sequence the entry sits in (``object``,
+``face``, ``alpr``, ``audio``), not from anything you write on the entry. So a
+face model registered on the server as type ``object`` can never be reached,
+even when the names match exactly.
+
+Confirm both halves of the pair with ``GET /models``, which reports the ``name``
+and ``type`` of everything loaded.
+
+Declaring models: two forms, and when each works
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**``models:`` (or ``--models``) is a filename shorthand.** Each entry is looked
+up on disk under ``base_path``, and both the *type* and the *framework* are
+inferred from the file that is found. It can therefore only express models that
+*have* a weights file: YOLO ONNX/Darknet, Coral TPU, TPU face detection.
+
+**``detector_config:`` declares models explicitly.** Use it whenever the type
+or framework cannot be inferred from a filename. This is **required**, not
+merely preferred, for:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Model
+     - Why the shorthand cannot express it
+   * - dlib face recognition
+     - Has no weights file at all -- it is driven by ``known_faces_dir`` and the
+       ``faces.dat`` encodings trained from it.
+   * - Anything needing type ``face``
+     - The shorthand infers ``type: object`` from a weights file; it never
+       produces ``type: face`` except for a recognised TPU face model.
+   * - Cloud ALPR / Rekognition
+     - Configured by API key, not by a local file. (These run client-side
+       anyway and are never requested from a gateway.)
+
+A name in ``models:`` that matches no file on disk falls back to the
+``ModelConfig`` defaults -- ``type: object``, ``framework: opencv``,
+``weights: None`` -- which is almost never what you meant. Loading such a model
+now fails with an explicit error naming ``detector_config`` as the fix; the
+other models on the server are unaffected and keep serving.
+
+.. important::
+
+   ``detector_config`` **replaces** the ``models`` list entirely. When it is
+   present, top-level ``models``, ``base_path`` and ``processor`` are ignored,
+   so every model needs its own absolute ``weights`` path and its own
+   ``processor``.
+
+Worked example -- object detection plus dlib face recognition on one gateway:
+
+.. code-block:: yaml
+
+   host: "0.0.0.0"
+   port: 5000
+   log_level: debug
+   workers: 1
+
+   detector_config:
+     models:
+       - name: "YOLOv11 ONNX"          # matches the client's object sequence entry
+         type: object
+         framework: opencv
+         processor: gpu
+         weights: "/var/lib/zmeventnotification/models/ultralytics/yolo11l.onnx"
+
+       - name: "DLIB face recognition" # matches the client's face sequence entry
+         type: face
+         framework: face_dlib
+         known_faces_dir: "/var/lib/zmeventnotification/known_faces"
+         unknown_faces_dir: "/var/lib/zmeventnotification/unknown_faces"
+         face_model: cnn
+
+The matching client ``objectconfig.yml``:
+
+.. code-block:: yaml
+
+   remote:
+     ml_gateway: "http://gpu-box:5000"
+     ml_fallback_local: "yes"
+
+   ml:
+     ml_sequence:
+       general:
+         model_sequence: "object,face"
+       object:
+         sequence:
+           - name: "YOLOv11 ONNX"      # same name, object sequence
+             object_framework: opencv
+             object_min_confidence: 0.5
+       face:
+         sequence:
+           - name: "DLIB face recognition"   # same name, face sequence
+             face_detection_framework: dlib
+
+dlib face recognition also needs ``dlib`` and ``face_recognition`` importable on
+the gateway -- they are imported lazily when the model loads and are **not** part
+of the ``[serve]`` extra. The encodings are trained on the gateway from
+``known_faces_dir`` the first time the model loads, so the face images must be
+present *there*, not on the ZM box.
 
 
 Which side owns which setting

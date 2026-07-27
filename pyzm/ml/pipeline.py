@@ -38,9 +38,31 @@ logger = logging.getLogger("pyzm.ml")
 # Backend factory
 # ---------------------------------------------------------------------------
 
+# Frameworks that cannot do anything without a weights file on disk. A config
+# reaching a backend without one is a configuration mistake, not a load failure,
+# and the backend's own error ("cannot determine an origin framework") does not
+# say so.
+_WEIGHTS_REQUIRED_FRAMEWORKS = frozenset({
+    ModelFramework.OPENCV,
+    ModelFramework.CORAL,
+    ModelFramework.FACE_TPU,
+})
+
+
 def _create_backend(model_config: ModelConfig) -> MLBackend:
     """Create the right backend based on the model framework."""
     fw = model_config.framework
+
+    if fw in _WEIGHTS_REQUIRED_FRAMEWORKS and not model_config.weights:
+        raise ValueError(
+            f"Model {model_config.name or fw.value!r} resolves to framework "
+            f"'{fw.value}' with no weights file. If you named it in a plain "
+            f"'models' list, that name matched nothing on disk and fell back to "
+            f"the defaults (type=object, framework=opencv). Models with no "
+            f"weights file of their own -- dlib face recognition, cloud ALPR, "
+            f"Rekognition -- must be declared under 'detector_config' with an "
+            f"explicit type and framework instead."
+        )
 
     if fw in (ModelFramework.OPENCV, ModelFramework.HOG, ModelFramework.VIRELAI):
         from pyzm.ml.backends.yolo import create_yolo_backend

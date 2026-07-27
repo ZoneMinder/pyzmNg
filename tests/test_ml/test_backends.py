@@ -301,6 +301,7 @@ class TestPipelineFactory:
 
         config = ModelConfig(
             framework=ModelFramework.FACE_TPU,
+            weights="/tmp/face.tflite",   # required: the TPU interpreter loads a file
             disable_locks=True,
         )
         backend = _create_backend(config)
