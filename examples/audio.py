@@ -13,7 +13,7 @@ Any format ffmpeg can read (WAV, MP3, MP4, etc.) is supported.
 
 See also:
     Detection options, multi-model pipelines:
-        https://pyzmv2.readthedocs.io/en/latest/guide/detection.html
+        https://pyzmng.readthedocs.io/en/latest/guide/detection.html
 """
 
 import sys

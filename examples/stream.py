@@ -6,9 +6,9 @@ Usage:
 
 See also:
     StreamConfig options, frame strategies, multi-model pipelines:
-        https://pyzmv2.readthedocs.io/en/latest/guide/detection.html
+        https://pyzmng.readthedocs.io/en/latest/guide/detection.html
     Quick-start guide:
-        https://pyzmv2.readthedocs.io/en/latest/guide/quickstart.html
+        https://pyzmng.readthedocs.io/en/latest/guide/quickstart.html
 """
 
 import sys

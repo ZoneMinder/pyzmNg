@@ -60,7 +60,7 @@ setup(name = NAME,
       author_email = AUTHOR_EMAIL,
       url = URL,
       project_urls={
-          'Documentation': 'https://pyzmv2.readthedocs.io/en/latest/',
+          'Documentation': 'https://pyzmng.readthedocs.io/en/latest/',
           'Source': 'https://github.com/ZoneMinder/pyzmNg',
           'Bug Tracker': 'https://github.com/ZoneMinder/pyzmNg/issues',
       },

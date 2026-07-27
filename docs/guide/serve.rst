@@ -261,6 +261,12 @@ any name you pass is looked up as follows:
 2. **File stem match** -- any ``<name>.onnx``, ``<name>.weights``, or
    ``<name>.tflite`` in any subdirectory of ``base_path``
 
+This lookup only works for models that *have* a weights file, and it always
+yields ``type: object`` -- see
+:ref:`serve-correlation` for what that means for a client, and
+:ref:`Declaring models <serve-declaring>` for the models that need an explicit
+declaration instead.
+
 The framework is inferred from the file extension:
 
 - ``.onnx`` -- OpenCV DNN (ONNX runtime)
@@ -345,6 +351,8 @@ even when the names match exactly.
 
 Confirm both halves of the pair with ``GET /models``, which reports the ``name``
 and ``type`` of everything loaded.
+
+.. _serve-declaring:
 
 Declaring models: two forms, and when each works
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -839,7 +847,8 @@ Health check. Returns:
 ~~~~~~~~~~~~~~~~
 
 Returns the list of available models and their load status. Useful with
-``--models all`` to check which backends have been lazily loaded.
+``--models all`` to check which backends have been lazily loaded, and to confirm
+the ``name`` and ``type`` a client must ask for (:ref:`serve-correlation`).
 
 .. code-block:: json
 
@@ -889,7 +898,8 @@ results.
 
   When the server has no model for the requested ``(type, name)``,
   ``detections`` is empty and ``error`` explains why (the client logs it and
-  continues, like a local model that fails to load).
+  continues, like a local model that fails to load). Both halves of that pair
+  must match something loaded here -- see :ref:`serve-correlation`.
 
 .. note::
 
@@ -954,6 +964,12 @@ While first setting a gateway up, use ``ml_fallback_local: "no"`` so a gateway
 problem fails loudly instead of quietly running locally and looking like it
 worked.
 
-The full ZoneMinder-side guide, including the ownership split and a
-troubleshooting table, is in the zmeventnotificationNg docs under
-*Using the remote ML detection server*.
+The full ZoneMinder-side guide is in the zmeventnotificationNg docs:
+
+- `Using the remote ML detection server <https://zmeventnotificationng.readthedocs.io/en/latest/guides/hooks.html#remote-ml-config>`__
+  -- end-to-end setup for both boxes
+- `Matching model names <https://zmeventnotificationng.readthedocs.io/en/latest/guides/hooks.html#remote-model-names>`__
+  -- the same correlation rule as :ref:`serve-correlation`, from the client side
+- `Which side owns which setting <https://zmeventnotificationng.readthedocs.io/en/latest/guides/hooks.html#remote-config-ownership>`__
+- `Verifying a remote setup <https://zmeventnotificationng.readthedocs.io/en/latest/guides/hooks.html#verifying-a-remote-setup>`__
+  -- commands that prove a run went remote, plus a symptom/cause table

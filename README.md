@@ -13,11 +13,11 @@ It's a pythonic wrapper that integrates with ZM and also operates as a standalon
 
 Installation
 =============
-See the [installation guide](https://pyzmv2.readthedocs.io/en/latest/guide/installation.html) on ReadTheDocs.
+See the [installation guide](https://pyzmng.readthedocs.io/en/latest/guide/installation.html) on ReadTheDocs.
 
 Documentation & Examples
 =========================
-Latest documentation is available <a href='https://pyzmv2.readthedocs.io/en/latest/'>here</a>. The documentation includes a full example.
+Latest documentation is available <a href='https://pyzmng.readthedocs.io/en/latest/'>here</a>. The documentation includes a full example.
 
 Features
 =========
