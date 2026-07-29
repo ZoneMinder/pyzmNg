@@ -270,17 +270,19 @@ class FrameExtractor:
                 logger.debug("Got JSON instead of image for frame URL")
                 raise ValueError("BAD_IMAGE")
 
+            # Must precede the ValueError clause: requests.JSONDecodeError
+            # subclasses both, and the ValueError branch would re-raise it.
+            except requests.RequestException as exc:
+                logger.warning(
+                    "Frame fetch failed on attempt %d/%d: %s",
+                    attempt, self._cfg.max_attempts, exc,
+                )
+
             except ValueError as exc:
                 if str(exc) != "BAD_IMAGE":
                     raise
                 logger.debug(
                     "Bad image on attempt %d/%d", attempt, self._cfg.max_attempts,
-                )
-
-            except requests.RequestException as exc:
-                logger.warning(
-                    "Frame fetch failed on attempt %d/%d: %s",
-                    attempt, self._cfg.max_attempts, exc,
                 )
 
             if attempt < self._cfg.max_attempts and self._cfg.sleep_between_attempts:

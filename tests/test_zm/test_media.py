@@ -99,6 +99,23 @@ class TestFetchFrameImage:
         with pytest.raises(ValueError, match="RELOGIN"):
             extractor._fetch_frame_image("url", _mock_cv2(), MagicMock())
 
+    def test_json_decode_error_returns_none(self):
+        """JSONDecodeError is both a RequestException and a ValueError.
+
+        The RequestException clause has to be matched first, or the
+        ValueError clause sees a message that is not BAD_IMAGE and re-raises.
+        """
+        api = _make_mock_api()
+        api.request.side_effect = requests.exceptions.JSONDecodeError(
+            "Expecting value", "", 0,
+        )
+        extractor = FrameExtractor(
+            api=api,
+            stream_config=StreamConfig(max_attempts=1, sleep_between_attempts=0),
+        )
+
+        assert extractor._fetch_frame_image("url", _mock_cv2(), MagicMock()) is None
+
 
 # ===================================================================
 # _read_zm_event

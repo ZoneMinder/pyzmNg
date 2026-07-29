@@ -481,6 +481,13 @@ times and then skipped; extraction stops once
 extracted are still returned and detection runs on them, so one
 unreachable frame does not abort the event.
 
+An unreachable ZM therefore stalls extraction rather than failing it
+outright. The worst case is ``contig_frames_before_error`` ×
+``max_attempts`` × (``ZMClientConfig.timeout`` +
+``sleep_between_attempts``) — about 150 seconds on the defaults
+(5 × 1 × 30s). Lower ``contig_frames_before_error`` when the caller has a
+tighter deadline.
+
 .. note::
 
    In remote-gateway URL mode, an empty ``frame_set`` combined with
