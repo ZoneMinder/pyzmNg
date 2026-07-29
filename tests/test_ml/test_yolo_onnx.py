@@ -4,10 +4,14 @@ Covers three scenarios:
   1. Near-zero confidences  → falls back to pre-NMS layer
   2. Identical confidences  → falls back to pre-NMS layer
   3. Valid e2e output       → returns detections directly
+
+Also covers metadata loading when the optional ``onnx`` package is missing.
 """
 
 from __future__ import annotations
 
+import logging
+import sys
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -127,3 +131,46 @@ class TestParseNativeE2E:
 
         mock_fwd.assert_not_called()
         assert yolo.is_native_e2e is True
+
+
+class TestMissingOnnxPackage:
+    """The optional ``onnx`` dependency is what reads labels/metadata."""
+
+    @staticmethod
+    def _make(labels=None):
+        from pyzm.ml.backends.yolo_onnx import YoloOnnx
+        from pyzm.models.config import ModelConfig
+
+        obj = object.__new__(YoloOnnx)
+        obj._config = ModelConfig(
+            name="YOLO ONNX", weights="yolo11n.onnx", labels=labels, disable_locks=True
+        )
+        obj.is_end2end = False
+        obj.is_native_e2e = False
+        obj.pre_nms_layer = None
+        return obj
+
+    def test_import_error_is_reported_with_install_hint(self, caplog):
+        """A missing onnx package must say so, and say how to fix it."""
+        yolo = self._make()
+
+        with patch.dict(sys.modules, {"onnx": None}):
+            with caplog.at_level(logging.ERROR, logger="pyzm.ml"):
+                assert yolo._load_onnx_metadata() is None
+
+        errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+        assert errors, "missing onnx must be logged at ERROR, not swallowed at debug"
+        assert "onnx" in errors[0]
+        assert "pip install" in errors[0]
+
+    def test_labels_file_still_works_without_onnx(self, tmp_path, caplog):
+        """A configured labels file does not need onnx — must not raise."""
+        labels = tmp_path / "labels.txt"
+        labels.write_text("person\ncar\n")
+        yolo = self._make(labels=str(labels))
+
+        with patch.dict(sys.modules, {"onnx": None}):
+            with caplog.at_level(logging.ERROR, logger="pyzm.ml"):
+                yolo.populate_class_labels()
+
+        assert yolo.classes == ["person", "car"]

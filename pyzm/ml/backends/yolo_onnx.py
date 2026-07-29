@@ -93,7 +93,17 @@ class YoloOnnx(YoloBase):
 
         try:
             import onnx
+        except ImportError:
+            logger.error(
+                "%s: the 'onnx' package is not installed, so class labels and "
+                "end2end metadata cannot be read from %s. Install it with: "
+                "pip install 'pyzm[ml]' (or pip install onnx)",
+                self.name,
+                self._config.weights,
+            )
+            return None
 
+        try:
             model = onnx.load(self._config.weights)
             meta = {prop.key: prop.value for prop in model.metadata_props}
 
