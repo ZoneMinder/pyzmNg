@@ -19,6 +19,8 @@ import time
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
+import requests
+
 from pyzm.models.config import StreamConfig
 from pyzm.models.zm import Frame
 
@@ -241,7 +243,14 @@ class FrameExtractor:
             self._inter_frame_delay(frames_yielded)
 
     def _fetch_frame_image(self, url: str, cv2: Any, np: Any) -> Any:
-        """Fetch a single frame image from the ZM API, with retries."""
+        """Fetch a single frame image from the ZM API, with retries.
+
+        Returns ``None`` when every attempt fails.  A transport failure
+        (read timeout, connection drop, exhausted session retries) is
+        treated like a bad image rather than being raised, so the caller's
+        ``contig_frames_before_error`` budget decides when to stop the
+        stream and frames already yielded survive.
+        """
         for attempt in range(1, self._cfg.max_attempts + 1):
             try:
                 resp = self._api.request(url)  # type: ignore[union-attr]
@@ -261,14 +270,23 @@ class FrameExtractor:
                 logger.debug("Got JSON instead of image for frame URL")
                 raise ValueError("BAD_IMAGE")
 
+            # Must precede the ValueError clause: requests.JSONDecodeError
+            # subclasses both, and the ValueError branch would re-raise it.
+            except requests.RequestException as exc:
+                logger.warning(
+                    "Frame fetch failed on attempt %d/%d: %s",
+                    attempt, self._cfg.max_attempts, exc,
+                )
+
             except ValueError as exc:
                 if str(exc) != "BAD_IMAGE":
                     raise
                 logger.debug(
                     "Bad image on attempt %d/%d", attempt, self._cfg.max_attempts,
                 )
-                if attempt < self._cfg.max_attempts and self._cfg.sleep_between_attempts:
-                    time.sleep(self._cfg.sleep_between_attempts)
+
+            if attempt < self._cfg.max_attempts and self._cfg.sleep_between_attempts:
+                time.sleep(self._cfg.sleep_between_attempts)
 
         return None
 

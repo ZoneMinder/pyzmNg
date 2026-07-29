@@ -435,7 +435,7 @@ Controls frame extraction from ZM events:
      - Number of contiguous frame-fetch failures before aborting
    * - ``max_attempts``
      - ``1``
-     - Number of retry attempts on failure
+     - Number of attempts per frame before it counts as a failure
    * - ``sleep_between_attempts``
      - ``3``
      - Seconds between retry attempts
@@ -471,6 +471,22 @@ Controls frame extraction from ZM events:
        skipping inference on the rest. Applies only to the ``first`` /
        ``first_new`` frame strategies (the ``most*`` strategies always
        process every frame). See :doc:`serve`.
+
+A frame counts as failed when ZM returns an unusable image *or* when the
+fetch fails at the transport level (read timeout, connection drop, or the
+session's own retries exhausted — see ``max_retries`` in
+:doc:`zm_client`). Either way the frame is retried up to ``max_attempts``
+times and then skipped; extraction stops once
+``contig_frames_before_error`` frames fail back to back. Frames already
+extracted are still returned and detection runs on them, so one
+unreachable frame does not abort the event.
+
+An unreachable ZM therefore stalls extraction rather than failing it
+outright. The worst case is ``contig_frames_before_error`` ×
+``max_attempts`` × (``ZMClientConfig.timeout`` +
+``sleep_between_attempts``) — about 150 seconds on the defaults
+(5 × 1 × 30s). Lower ``contig_frames_before_error`` when the caller has a
+tighter deadline.
 
 .. note::
 
