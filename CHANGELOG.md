@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.5.1] - 2026-07-30
+
+### Bug Fixes
+
+- report a missing onnx package instead of swallowing it ([ad0ddd5](https://github.com/ZoneMinder/pyzmNg/commit/ad0ddd5d783b0ab9e599f3646503ff379b3f3be1))
+- match RequestException before ValueError on frame fetch ([47186aa](https://github.com/ZoneMinder/pyzmNg/commit/47186aae4f252bbe0afe51652235ea68c37e3110))
+- don't let a frame-fetch timeout abort the event ([5d5e63e](https://github.com/ZoneMinder/pyzmNg/commit/5d5e63e8c0b091ec21da1ea8474dbbef98a9bb95))
+- reject a model that resolved to a framework with no weights ([3f1c5f0](https://github.com/ZoneMinder/pyzmNg/commit/3f1c5f047c9dd30c0e84559a599383f7fff24c45))
+
+### Documentation
+
+- point at pyzmng.readthedocs.io and connect the remote sections ([b9dd2e9](https://github.com/ZoneMinder/pyzmNg/commit/b9dd2e97aae52c0837f2d23e1d811513ad4beeec))
+- say why the models shorthand serves YOLO but not faces ([33eec7d](https://github.com/ZoneMinder/pyzmNg/commit/33eec7dd3cae6d7a26c2c1af766c79c58625d756))
+
+### Miscellaneous
+
+- bump version to v2.5.1 ([de15e08](https://github.com/ZoneMinder/pyzmNg/commit/de15e083a59db0cf3d1aa806c9f009e27dfadbcb))
+
 ## [2.5.0] - 2026-07-26
 
 ### Bug Fixes
@@ -13,6 +31,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- update CHANGELOG for v2.5.0 ([8eb4bdf](https://github.com/ZoneMinder/pyzmNg/commit/8eb4bdf7e601d09e6b628698271c078ddda036f9))
 - install from release packages, and point at [full] for training ([8ff8efb](https://github.com/ZoneMinder/pyzmNg/commit/8ff8efbdcbef618b7c8482c544f3f4095b34fedc))
 - correct the serve guide after the dumb-gateway rework ([0d448a8](https://github.com/ZoneMinder/pyzmNg/commit/0d448a8f4df2d07a285916c32f2817e382630f73))
 
