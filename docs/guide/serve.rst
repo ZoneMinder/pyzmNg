@@ -615,6 +615,14 @@ CLI options
    * - ``--processor``
      - ``cpu``
      - ``cpu``, ``gpu``, or ``tpu``
+   * - ``--no-cpu-fallback``
+     - off
+     - Fail a request instead of degrading to CPU when GPU inference errors.
+       See :ref:`serve-gpu-fallback`.
+   * - ``--gpu-retry-seconds``
+     - ``60``
+     - Seconds on CPU after a GPU failure before the GPU is retried, doubling
+       after each further failure. ``0`` makes a fallback permanent.
    * - ``--auth``
      - off
      - Enable JWT authentication
@@ -695,6 +703,58 @@ Notes:
   workers automatically -- authentication works the same as single-worker
   mode.
 - ``--workers`` is ignored on Windows.
+
+
+.. _serve-gpu-fallback:
+
+When the GPU fails
+~~~~~~~~~~~~~~~~~~~
+
+CUDA errors happen: a driver hiccup, another process holding the device, a
+failed unified-memory allocation. When an inference call on a ``gpu`` model
+raises, the server does not fail the request -- it moves that model to CPU,
+re-runs the frame, and answers. Detection keeps working, several times slower.
+
+That fallback is **temporary**. After ``--gpu-retry-seconds`` (60 by default)
+the next request puts the model back on CUDA. If it fails again the wait
+doubles, up to 15 minutes, so a genuinely broken GPU is not re-probed on every
+request while a momentary fault heals itself within a minute. Both events are
+logged at ``ERROR`` / ``INFO`` by the ``pyzm.ml`` logger:
+
+.. code-block:: text
+
+   pyzm.ml ERROR yolo11m: GPU failed: OpenCV(4.12.0) ... CUDA-capable device(s)
+     is/are busy or unavailable. Falling back to CPU; retrying GPU in 60 seconds.
+   pyzm.ml INFO  yolo11m: retrying GPU inference after an earlier CPU fallback
+
+**Detecting a degraded server.** Logs are not a monitor. ``GET /models``
+reports, per model, the ``processor`` in use right now and the
+``requested_processor`` it was configured with; a gateway that has degraded is
+one where they differ. The endpoint needs no authentication, so a container
+healthcheck can use it directly:
+
+.. code-block:: bash
+
+   curl -sf http://localhost:5000/models \
+     | python3 -c 'import json,sys; m=json.load(sys.stdin)["models"]; \
+       sys.exit(any(x["processor"] != x["requested_processor"] for x in m))'
+
+**Refusing to degrade.** Some deployments would rather fail a request than
+answer it slowly and silently -- a caller cannot tell a slow answer from a fast
+one, but it can act on an error. ``--no-cpu-fallback`` makes a GPU failure
+propagate instead: ``/infer`` returns ``{"detections": [], "error": "..."}``
+and the model stays on GPU for the next request.
+
+.. code-block:: bash
+
+   # never answer from CPU; retry the GPU after 30s instead of 60s
+   python -m pyzm.serve --models yolo11m --processor gpu \
+       --no-cpu-fallback --gpu-retry-seconds 30
+
+Both settings also exist per-model as ``allow_cpu_fallback`` and
+``gpu_retry_seconds`` on a ``ModelConfig`` (in a ``detector_config`` block or
+an ``ml_sequence`` entry). The CLI flags apply to every model the server loads
+and are only stamped onto the model configs when you pass them.
 
 
 Client usage
@@ -846,18 +906,27 @@ Health check. Returns:
 ``GET /models``
 ~~~~~~~~~~~~~~~~
 
-Returns the list of available models and their load status. Useful with
-``--models all`` to check which backends have been lazily loaded, and to confirm
-the ``name`` and ``type`` a client must ask for (:ref:`serve-correlation`).
+Returns the list of available models, their load status, and the processor each
+one is running on. Useful with ``--models all`` to check which backends have
+been lazily loaded, to confirm the ``name`` and ``type`` a client must ask for
+(:ref:`serve-correlation`), and to detect a GPU model that has degraded to CPU
+(:ref:`serve-gpu-fallback`).
 
 .. code-block:: json
 
    {
      "models": [
-       {"name": "yolo11s", "type": "object", "framework": "opencv", "loaded": true},
-       {"name": "yolo26s", "type": "object", "framework": "opencv", "loaded": false}
+       {"name": "yolo11s", "type": "object", "framework": "opencv",
+        "loaded": true, "processor": "gpu", "requested_processor": "gpu"},
+       {"name": "yolo26s", "type": "object", "framework": "opencv",
+        "loaded": false, "processor": "cpu", "requested_processor": "cpu"}
      ]
    }
+
+``processor`` is what inference is running on **now**; ``requested_processor``
+is what the model was configured with. They differ only when a GPU model has
+fallen back to CPU. This endpoint is never authenticated, so a container
+healthcheck can compare the two without a token.
 
 ``POST /infer``
 ~~~~~~~~~~~~~~~~

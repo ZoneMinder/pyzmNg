@@ -18,7 +18,7 @@ import requests as http_requests
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 
 from pyzm.ml.detector import Detector
-from pyzm.models.config import ServerConfig
+from pyzm.models.config import ModelConfig, ServerConfig
 from pyzm.serve.auth import create_login_route, create_token_dependency
 
 logger = logging.getLogger("pyzm.serve")
@@ -53,6 +53,26 @@ def config_from_env() -> ServerConfig:
 
     raw = os.environ.get(_CONFIG_ENV_VAR)
     return ServerConfig.model_validate(json.loads(raw)) if raw else ServerConfig()
+
+
+def _apply_gpu_policy(
+    models: list["ModelConfig"], config: ServerConfig
+) -> list["ModelConfig"]:
+    """Stamp the server-wide GPU-fallback policy onto every model config.
+
+    ``--no-cpu-fallback`` / ``--gpu-retry-seconds`` are operator decisions about
+    the whole gateway, but the behaviour lives on each backend's ModelConfig.
+    Only options the operator actually set are applied, so a per-model value
+    from a ``detector_config`` is never silently overwritten. Refs #66
+    """
+    update: dict[str, Any] = {}
+    if not config.allow_cpu_fallback:
+        update["allow_cpu_fallback"] = False
+    if config.gpu_retry_seconds is not None:
+        update["gpu_retry_seconds"] = config.gpu_retry_seconds
+    if not update:
+        return models
+    return [mc.model_copy(update=update) for mc in models]
 
 
 def get_app() -> FastAPI:
@@ -94,6 +114,7 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                 base_path=config.base_path,
                 processor=config.processor,
             )
+        detector._config.models = _apply_gpu_policy(detector._config.models, config)
         detector._ensure_pipeline(lazy=lazy)
         app.state.detector = detector
         mode = "lazy" if lazy else "eager"
@@ -136,6 +157,12 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
                 "type": mc.type.value,
                 "framework": mc.framework.value,
                 "loaded": backend.is_loaded,
+                # What inference is running on *now* vs what was asked for. A
+                # GPU model that hit a CUDA error reports processor="cpu" here,
+                # which is the only thing that makes a degraded gateway visible
+                # to a healthcheck. Refs #66
+                "processor": getattr(backend, "processor", mc.processor.value),
+                "requested_processor": mc.processor.value,
             })
         return {"models": result}
 

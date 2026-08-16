@@ -27,6 +27,26 @@ def main() -> None:
     )
     ap.add_argument("--base-path", default="/var/lib/zmeventnotification/models")
     ap.add_argument("--processor", default="cpu", choices=["cpu", "gpu", "tpu"])
+    ap.add_argument(
+        "--no-cpu-fallback",
+        dest="allow_cpu_fallback",
+        action="store_false",
+        help=(
+            "Fail a request instead of silently degrading to CPU when GPU "
+            "inference errors. Without this, a GPU model that hits a CUDA "
+            "error keeps answering -- several times slower."
+        ),
+    )
+    ap.add_argument(
+        "--gpu-retry-seconds",
+        type=int,
+        default=None,
+        help=(
+            "Seconds to stay on CPU after a GPU failure before retrying the "
+            "GPU, doubling after each further failure (default 60). "
+            "0 makes a fallback permanent for the life of the process."
+        ),
+    )
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=5000)
     ap.add_argument("--auth", action="store_true", help="Enable JWT authentication")
@@ -71,6 +91,8 @@ def main() -> None:
             models=args.models,
             base_path=args.base_path,
             processor=Processor(args.processor),
+            allow_cpu_fallback=args.allow_cpu_fallback,
+            gpu_retry_seconds=args.gpu_retry_seconds,
             auth_enabled=args.auth,
             auth_username=args.auth_user,
             auth_password=args.auth_password,

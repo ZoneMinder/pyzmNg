@@ -557,6 +557,23 @@ class ServerConfig(BaseModel):
     )
     base_path: str = "/var/lib/zmeventnotification/models"
     processor: Processor = Processor.CPU
+    allow_cpu_fallback: bool = Field(
+        default=True,
+        description=(
+            "When False, a model asked to run on the GPU raises instead of "
+            "degrading to CPU after a CUDA failure. A gateway that has quietly "
+            "become a CPU gateway is invisible to its callers; failing the "
+            "request instead is not."
+        ),
+    )
+    gpu_retry_seconds: int | None = Field(
+        default=None,
+        description=(
+            "Seconds a model stays on CPU after a GPU failure before the GPU is "
+            "retried, doubling after each further failure. None leaves each "
+            "model's own value (60s) in place; 0 makes the fallback permanent."
+        ),
+    )
     detector_config: DetectorConfig | None = None
     auth_enabled: bool = False
     auth_username: str = "admin"
