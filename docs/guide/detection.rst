@@ -372,7 +372,16 @@ Per-model settings:
        labels="/path/to/coco.names",
        min_confidence=0.3,
        pattern="(person|car|dog)",
+       allow_cpu_fallback=True,          # degrade to CPU when CUDA errors
+       gpu_retry_seconds=60,             # then retry the GPU after 60s
    )
+
+A ``gpu`` model that hits a CUDA error moves to CPU so the frame is still
+detected, and retries the GPU after ``gpu_retry_seconds`` (doubling the wait
+after each further failure, up to 15 minutes). Set ``gpu_retry_seconds=0`` to
+make the fallback permanent, or ``allow_cpu_fallback=False`` to raise instead
+of degrading. On a long-running server, see :ref:`serve-gpu-fallback` for how
+to detect a model that is currently degraded.
 
 See the API reference for the full list of fields (face-specific,
 ALPR-specific, AWS, lock management, etc.).

@@ -298,6 +298,37 @@ class TestDetectorConfig:
         assert len(dc.models) == 1
         assert dc.models[0].enabled is False
 
+    def test_from_dict_gpu_fallback_policy(self):
+        """A sequence entry can set the GPU fallback policy. Refs #66"""
+        ml_options = {
+            "general": {"model_sequence": "object"},
+            "object": {
+                "general": {},
+                "sequence": [
+                    {
+                        "name": "strict-gpu",
+                        "object_processor": "gpu",
+                        "allow_cpu_fallback": "no",
+                        "gpu_retry_seconds": "30",
+                    },
+                ],
+            },
+        }
+        dc = DetectorConfig.from_dict(ml_options)
+        assert dc.models[0].allow_cpu_fallback is False
+        assert dc.models[0].gpu_retry_seconds == 30
+        # recognised keys must not leak into the catch-all options dict
+        assert dc.models[0].options == {}
+
+    def test_from_dict_gpu_fallback_policy_defaults(self):
+        ml_options = {
+            "general": {"model_sequence": "object"},
+            "object": {"general": {}, "sequence": [{"name": "t"}]},
+        }
+        dc = DetectorConfig.from_dict(ml_options)
+        assert dc.models[0].allow_cpu_fallback is True
+        assert dc.models[0].gpu_retry_seconds == 60
+
     def test_from_dict_unknown_model_type_skipped(self):
         ml_options = {
             "general": {"model_sequence": "object,unknown_type"},

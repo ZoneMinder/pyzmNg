@@ -162,6 +162,15 @@ class ModelConfig(BaseModel):
     aws_access_key_id: str | None = None
     aws_secret_access_key: str | None = None
 
+    # GPU fallback policy (OpenCV DNN backends).
+    # A CUDA failure normally degrades the model to CPU so the request is still
+    # answered. allow_cpu_fallback=False raises instead, for deployments that
+    # would rather fail than answer slowly and silently. gpu_retry_seconds is
+    # how long to stay on CPU before probing the GPU again -- the wait doubles
+    # after each further failure, and 0 makes the fallback permanent.
+    allow_cpu_fallback: bool = True
+    gpu_retry_seconds: int = 60
+
     # Lock management
     disable_locks: bool = False
     max_lock_wait: int = 120
@@ -387,6 +396,7 @@ def _seq_item_to_model_config(
         "aws_region", "aws_access_key_id", "aws_secret_access_key",
         "disable_locks", "max_lock_wait", "max_processes",
         "pre_existing_labels",
+        "allow_cpu_fallback", "gpu_retry_seconds",
     })
     options = {k: v for k, v in seq.items() if k not in _KNOWN_SEQ_KEYS}
 
@@ -426,6 +436,8 @@ def _seq_item_to_model_config(
         aws_region=seq.get("aws_region", "us-east-1"),
         aws_access_key_id=seq.get("aws_access_key_id"),
         aws_secret_access_key=seq.get("aws_secret_access_key"),
+        allow_cpu_fallback=_bool(seq.get("allow_cpu_fallback", True), default=True),
+        gpu_retry_seconds=int(seq.get("gpu_retry_seconds", 60)),
         disable_locks=_bool(seq.get("disable_locks") or global_general.get("disable_locks", "no")),
         max_lock_wait=int(seq.get("max_lock_wait", global_general.get("max_lock_wait", 120))),
         max_processes=int(seq.get("max_processes", global_general.get("max_processes", 1))),

@@ -23,6 +23,31 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("pyzm.ml")
 
+# Ceiling for the escalating GPU-retry backoff, in seconds. A genuinely broken
+# GPU is re-probed at most this often; a transient fault still heals in one
+# gpu_retry_seconds. Refs #66
+_GPU_RETRY_BACKOFF_CAP = 900
+
+
+class _GpuState:
+    """GPU fallback state, shared by every shallow copy of a backend.
+
+    ``pyzm.serve`` shallow-copies a loaded backend to give one request its own
+    ``min_confidence``. The copies share the same ``net``, so they must share
+    this too: a fallback on a copy switches the shared net to CPU, and without
+    shared state the original -- the object ``/models`` reports on, and the one
+    that would retry the GPU -- would go on claiming it runs on GPU.
+    """
+
+    __slots__ = ("processor", "retry_at", "delay")
+
+    def __init__(self, processor: str, delay: int) -> None:
+        self.processor = processor
+        # monotonic deadline after which the GPU is worth retrying;
+        # None = not degraded, or degraded with no retry scheduled.
+        self.retry_at: float | None = None
+        self.delay = delay
+
 
 def _cv2_version() -> tuple[int, int, int]:
     """Return ``(major, minor, patch)`` from ``cv2.__version__``."""
@@ -51,7 +76,7 @@ class YoloBase(MLBackend, PortalockerMixin):
         self._config = config
         self.net = None
         self.classes: list[str] | None = None
-        self.processor = config.processor.value
+        self._gpu = _GpuState(config.processor.value, config.gpu_retry_seconds)
         self.model_height = config.model_height or self._DEFAULT_DIM
         self.model_width = config.model_width or self._DEFAULT_DIM
         self._init_lock()
@@ -66,6 +91,20 @@ class YoloBase(MLBackend, PortalockerMixin):
     def is_loaded(self) -> bool:
         return self.net is not None
 
+    @property
+    def processor(self) -> str:
+        """The processor inference is *actually* running on right now."""
+        return self._gpu.processor
+
+    @processor.setter
+    def processor(self, value: str) -> None:
+        self._gpu.processor = value
+
+    @property
+    def requested_processor(self) -> str:
+        """The processor this model was configured with, fallback or not."""
+        return self._config.processor.value
+
     def load(self) -> None:
         logger.info(
             "%s: loading YOLO model (processor=%s, weights=%s)",
@@ -76,11 +115,11 @@ class YoloBase(MLBackend, PortalockerMixin):
         self._load_model()
 
         # Detect GPU→CPU fallback
-        if self.processor != self._config.processor.value:
+        if self.processor != self.requested_processor:
             logger.warning(
                 "%s: requested processor=%s but fell back to %s",
                 self.name,
-                self._config.processor.value,
+                self.requested_processor,
                 self.processor,
             )
         else:
@@ -112,26 +151,31 @@ class YoloBase(MLBackend, PortalockerMixin):
             if self._config.min_confidence < conf_threshold:
                 conf_threshold = self._config.min_confidence
 
+            self._maybe_restore_gpu()
+
             _t0 = _time.perf_counter()
             try:
                 class_ids, confidences, boxes = self._forward_and_parse(
                     blob, Width, Height, conf_threshold
                 )
-            except cv2.error as e:
                 if self.processor == "gpu":
+                    # A healthy run clears the escalating retry backoff, so the
+                    # next transient fault is retried after the base delay.
+                    self._gpu.delay = self._config.gpu_retry_seconds
+            except cv2.error as e:
+                if self.processor != "gpu":
+                    raise
+                if not self._config.allow_cpu_fallback:
                     logger.error(
-                        "%s: GPU inference failed: %s. Falling back to CPU.",
+                        "%s: GPU inference failed and CPU fallback is disabled: %s",
                         self.name,
                         e,
                     )
-                    self.processor = "cpu"
-                    self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-                    self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-                    class_ids, confidences, boxes = self._forward_and_parse(
-                        blob, Width, Height, conf_threshold
-                    )
-                else:
                     raise
+                self._fall_back_to_cpu(e)
+                class_ids, confidences, boxes = self._forward_and_parse(
+                    blob, Width, Height, conf_threshold
+                )
 
             diff_time = f"{(_time.perf_counter() - _t0) * 1000:.2f} ms"
             logger.debug(
@@ -200,6 +244,61 @@ class YoloBase(MLBackend, PortalockerMixin):
         with open(labels_path, "r") as f:
             self.classes = [line.strip() for line in f.readlines()]
 
+    def _fall_back_to_cpu(self, reason: object, *, retry: bool = True) -> None:
+        """Move the net to CPU after a GPU failure and schedule a GPU retry.
+
+        The fallback used to be permanent: a single transient CUDA error pinned
+        a long-lived server to CPU for the rest of the process, several times
+        slower, with nothing but one log line to say so. Scheduling a retry lets
+        a momentary fault heal itself; the wait doubles on each further failure
+        so a genuinely broken GPU is not re-probed on every request.
+
+        *retry* is False for conditions that cannot heal (an OpenCV build with
+        no CUDA support at all). Refs #66
+        """
+        import cv2
+
+        self.processor = "cpu"
+        if self.net is not None:
+            self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+            self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+
+        wait = self._gpu.delay if retry else 0
+        if wait <= 0:
+            self._gpu.retry_at = None
+            logger.error(
+                "%s: GPU failed: %s. Falling back to CPU for the life of this "
+                "process (GPU retry disabled).",
+                self.name,
+                reason,
+            )
+            return
+
+        self._gpu.retry_at = _time.monotonic() + wait
+        self._gpu.delay = min(wait * 2, _GPU_RETRY_BACKOFF_CAP)
+        logger.error(
+            "%s: GPU failed: %s. Falling back to CPU; retrying GPU in %d seconds.",
+            self.name,
+            reason,
+            wait,
+        )
+
+    def _maybe_restore_gpu(self) -> None:
+        """Put the net back on CUDA once the fallback backoff has elapsed."""
+        if self._gpu.retry_at is None or _time.monotonic() < self._gpu.retry_at:
+            return
+
+        import cv2
+
+        self._gpu.retry_at = None
+        logger.info("%s: retrying GPU inference after an earlier CPU fallback", self.name)
+        self.processor = "gpu"
+        try:
+            self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+            self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+        except Exception as e:
+            self._fall_back_to_cpu(e)
+
     def _setup_gpu(self, cv2_ver: tuple[int, int, int]) -> None:
         """Configure CUDA backend if processor is 'gpu' and OpenCV supports it."""
         import cv2
@@ -221,14 +320,7 @@ class YoloBase(MLBackend, PortalockerMixin):
                 self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
                 self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
             except Exception as e:
-                logger.error(
-                    "%s: failed to set CUDA backend: %s. Falling back to CPU.",
-                    self.name,
-                    e,
-                )
-                self.processor = "cpu"
-                self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-                self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+                self._fall_back_to_cpu(f"CUDA backend setup failed: {e}")
 
     def _create_blob(self, image: "np.ndarray"):
         import cv2
