@@ -349,6 +349,7 @@ Top-level detection settings:
        frame_strategy="most_models",     # first | most | most_unique | most_models
        pattern=".*",                     # global label regex filter
        max_detection_size="50%",         # max bbox size (% of image or "Npx")
+       zone_match_strategy="any_matching",  # how overlapping zones are resolved
        match_past_detections=False,      # compare with previous run
        past_det_max_diff_area="5%",      # area tolerance for past matching
        type_overrides={...},             # per-type overrides (see below)
@@ -718,6 +719,10 @@ specific zones:
             ignore_pattern="(car|truck)"),  # suppress parked vehicles
    ]
 
+Whether a suppression sticks when the box also overlaps another zone
+depends on ``zone_match_strategy`` — see
+:ref:`resolving-overlapping-zones` below.
+
 .. note::
 
    When no zones are passed (or the list is empty), zone filtering is
@@ -725,6 +730,61 @@ specific zones:
 
 When using ZoneMinder events, use ``zm.monitor(monitor_id).get_zones()`` to
 fetch zones configured in the ZM web UI.
+
+
+.. _resolving-overlapping-zones:
+
+Resolving overlapping zones
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A zone matches when the bounding box *intersects* the polygon, not when it
+is contained by it, so one detection can land in several zones at once — a
+car in the street whose box dips a few pixels into the driveway is in both.
+``zone_match_strategy`` decides which of those zones gets to rule on the
+detection:
+
+``any_matching`` (default)
+   The detection is kept as soon as *any* intersecting zone's ``pattern``
+   matches it.  A zone that rejects it does not stop a later zone from
+   keeping it, so an exclusion zone bordering a permissive one can be
+   defeated by a few pixels of overlap.
+
+``first_intersecting``
+   The first intersecting zone decides, whether it keeps or rejects.  This
+   is the pyzm 0.3.x / ES 6 behaviour, and is what an ES 6 config was
+   written against.  It depends on the order zones are listed in.
+
+``largest_overlap``
+   The zone covering the largest share of the bounding box decides; ties go
+   to the earlier zone.  Order-independent, and it resolves the sliver case
+   the way an operator expects.
+
+Under ``first_intersecting`` and ``largest_overlap`` a rejection is final —
+by ``ignore_pattern`` or by a ``pattern`` mismatch — which is what makes
+"never alert on this label here" expressible.  Under ``any_matching`` it is
+not: another zone can still rescue the detection.
+
+.. code-block:: python
+
+   config = DetectorConfig(
+       models=[...],
+       zone_match_strategy="largest_overlap",
+   )
+
+In ``objectconfig.yml`` it is a top-level ``general`` key:
+
+.. code-block:: yaml
+
+   ml_sequence:
+     general:
+       model_sequence: "object"
+       zone_match_strategy: "largest_overlap"
+
+.. note::
+
+   The default stays ``any_matching`` so upgrading pyzm does not silently
+   change which detections survive.  Set it explicitly if you rely on
+   exclusion zones.
 
 
 .. _per-type-overrides:
@@ -750,6 +810,8 @@ override it takes precedence; otherwise the global value is used.
 - ``frame_strategy`` — operates above model types (picks best frame
   across all types)
 - ``image_path`` — just a directory path, no per-type meaning
+- ``zone_match_strategy`` — zone filtering runs once, after all model types
+  have been sequenced
 
 In Python:
 

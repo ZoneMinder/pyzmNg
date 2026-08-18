@@ -356,7 +356,10 @@ class Detector:
 
         detections = filter_by_pattern(detections, self._config.pattern)
         detections = filter_by_size(detections, self._config.max_detection_size, (h, w))
-        detections, error_boxes = filter_by_zone(detections, zone_dicts, (h, w))
+        detections, error_boxes = filter_by_zone(
+            detections, zone_dicts, (h, w),
+            strategy=self._config.zone_match_strategy,
+        )
         detections = filter_past_per_type(detections, self._config)
 
         return detections, error_boxes

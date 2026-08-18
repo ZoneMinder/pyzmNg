@@ -490,7 +490,7 @@ returned detections, so it is identical local and remote:
 
 - ``min_confidence`` (sent on the ``/infer`` call and applied in place of the
   value this server loaded the model with)
-- ``pattern``, zones, ``max_detection_size``
+- ``pattern``, zones (including ``zone_match_strategy``), ``max_detection_size``
 - ``model_sequence``, ``same_model_sequence_strategy``, ``frame_strategy``
 - past-detection filtering and ``pre_existing_labels`` gating
 

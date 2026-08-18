@@ -14,6 +14,7 @@ from pyzm.models.config import (
     ModelFramework,
     ModelType,
     Processor,
+    ZoneMatchStrategy,
 )
 from pyzm.models.detection import BBox, Detection, DetectionResult
 
@@ -1706,3 +1707,52 @@ class TestRemoteInference:
         assert res.labels == ["person"]                       # object survived
         assert any("Gateway cannot run" in r.message for r in caplog.records)  # clear warning
         assert not any(r.levelname == "ERROR" for r in caplog.records)         # not a traceback
+
+
+# ===================================================================
+# TestApplyFiltersZoneStrategy  (Ref: ZoneMinder/pyzmNg#68)
+# ===================================================================
+
+@pytest.mark.integration
+class TestApplyFiltersZoneStrategy:
+    """Detector._apply_filters honours config.zone_match_strategy.
+
+    The issue's sliver case: the car's box is 70.7% inside ``street``
+    (which rejects it) and clips 10.4% of patternless ``drivewayfar``.
+    """
+
+    @staticmethod
+    def _zones():
+        from pyzm.models.zm import Zone
+        return [
+            Zone(name="street",
+                 points=[(1489, 84), (1919, 86), (1919, 296), (1483, 107)],
+                 pattern="(NeverMatchThis)"),
+            Zone(name="drivewayfar",
+                 points=[(1446, 86), (1483, 92), (1912, 294), (1912, 345),
+                         (1424, 246), (1394, 244)]),
+        ]
+
+    def _filter(self, strategy):
+        from pyzm.ml.detector import Detector
+        det = Detector.__new__(Detector)
+        det._config = DetectorConfig(zone_match_strategy=strategy)
+        det._pipeline = None
+        dets = [Detection(label="car", confidence=0.9,
+                          bbox=BBox(1554, 59, 1718, 167), model_name="test")]
+        return det._apply_filters(dets, zones=self._zones(), image_shape=(1080, 1920))
+
+    def test_default_any_matching_keeps(self):
+        filtered, errors = self._filter(ZoneMatchStrategy.ANY_MATCHING)
+        assert [d.label for d in filtered] == ["car"]
+        assert errors == []
+
+    def test_largest_overlap_drops(self):
+        filtered, errors = self._filter(ZoneMatchStrategy.LARGEST_OVERLAP)
+        assert filtered == []
+        assert len(errors) == 1
+
+    def test_first_intersecting_drops(self):
+        filtered, errors = self._filter(ZoneMatchStrategy.FIRST_INTERSECTING)
+        assert filtered == []
+        assert len(errors) == 1

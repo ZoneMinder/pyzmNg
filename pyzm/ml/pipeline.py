@@ -286,7 +286,10 @@ class ModelPipeline:
         all_detections = filter_by_size(all_detections, self._config.max_detection_size, (h, w))
 
         # Apply zone filtering (returns kept and error_boxes)
-        all_detections, all_error_boxes = filter_by_zone(all_detections, zone_dicts, (h, w))
+        all_detections, all_error_boxes = filter_by_zone(
+            all_detections, zone_dicts, (h, w),
+            strategy=self._config.zone_match_strategy,
+        )
 
         # Apply past-detection deduplication (per-type with global fallback)
         all_detections = self._filter_past_per_type(all_detections)
