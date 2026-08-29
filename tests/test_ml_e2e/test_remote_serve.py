@@ -60,6 +60,10 @@ class TestRemoteDetection:
             models = data["models"]
             assert len(models) > 0
             assert models[0]["loaded"] is True
+            # The processor actually in use, so a degraded gateway is visible
+            # (start_serve runs the server with --processor cpu). Refs #66
+            assert models[0]["processor"] == "cpu"
+            assert models[0]["requested_processor"] == "cpu"
         finally:
             stop_serve(proc)
 
