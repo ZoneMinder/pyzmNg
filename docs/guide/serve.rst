@@ -739,6 +739,14 @@ healthcheck can use it directly:
      | python3 -c 'import json,sys; m=json.load(sys.stdin)["models"]; \
        sys.exit(any(x["processor"] != x["requested_processor"] for x in m))'
 
+.. note::
+
+   Fallback state is per **process**. With ``--workers N`` each worker holds its
+   own models and degrades independently, so the check above answers for
+   whichever worker uvicorn hands it and can report healthy while another worker
+   is on CPU. A single worker is normally the right choice on GPU anyway; if you
+   do run several, treat a healthy answer as "at least one worker is fine".
+
 **Refusing to degrade.** Some deployments would rather fail a request than
 answer it slowly and silently -- a caller cannot tell a slow answer from a fast
 one, but it can act on an error. ``--no-cpu-fallback`` makes a GPU failure

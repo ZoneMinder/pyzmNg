@@ -244,7 +244,7 @@ class YoloBase(MLBackend, PortalockerMixin):
         with open(labels_path, "r") as f:
             self.classes = [line.strip() for line in f.readlines()]
 
-    def _fall_back_to_cpu(self, reason: object, *, retry: bool = True) -> None:
+    def _fall_back_to_cpu(self, reason: object) -> None:
         """Move the net to CPU after a GPU failure and schedule a GPU retry.
 
         The fallback used to be permanent: a single transient CUDA error pinned
@@ -253,8 +253,9 @@ class YoloBase(MLBackend, PortalockerMixin):
         a momentary fault heal itself; the wait doubles on each further failure
         so a genuinely broken GPU is not re-probed on every request.
 
-        *retry* is False for conditions that cannot heal (an OpenCV build with
-        no CUDA support at all). Refs #66
+        A retry is always scheduled unless ``gpu_retry_seconds`` is 0. The one
+        condition that cannot heal -- an OpenCV build with no CUDA support at
+        all -- never reaches here; ``_setup_gpu()`` handles it directly. Refs #66
         """
         import cv2
 
@@ -263,7 +264,7 @@ class YoloBase(MLBackend, PortalockerMixin):
             self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
             self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
-        wait = self._gpu.delay if retry else 0
+        wait = self._gpu.delay
         if wait <= 0:
             self._gpu.retry_at = None
             logger.error(
