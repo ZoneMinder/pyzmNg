@@ -771,7 +771,10 @@ not: another zone can still rescue the detection.
        zone_match_strategy="largest_overlap",
    )
 
-In ``objectconfig.yml`` it is a top-level ``general`` key:
+In ``objectconfig.yml`` it belongs to the ``general`` section *inside*
+``ml_sequence`` — not the event server's own top-level ``general`` section,
+which is validated against a whitelist and drops unknown keys with a single
+Info line, so a strategy written there never reaches pyzm:
 
 .. code-block:: yaml
 

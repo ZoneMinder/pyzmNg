@@ -8,6 +8,7 @@ from pyzm.models.config import (
     Processor,
     MatchStrategy,
     FrameStrategy,
+    ZoneMatchStrategy,
 )
 from pyzm.models.detection import BBox, Detection, DetectionResult
 from pyzm.models.zm import Monitor, Event, Frame, Zone
@@ -22,6 +23,7 @@ __all__ = [
     "Processor",
     "MatchStrategy",
     "FrameStrategy",
+    "ZoneMatchStrategy",
     "BBox",
     "Detection",
     "DetectionResult",

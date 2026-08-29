@@ -348,6 +348,13 @@ class TestZoneMatchStrategy:
                 _minimal_ml_options(global_general_extras={"zone_match_strategy": "closest"})
             )
 
+    def test_exported_from_pyzm_models(self):
+        """Consumers import the enum from pyzm.models, next to its siblings."""
+        import pyzm.models as models
+
+        assert models.ZoneMatchStrategy is ZoneMatchStrategy
+        assert "ZoneMatchStrategy" in models.__all__
+
     def test_per_type_section_warns_global_only(self, caplog):
         with caplog.at_level(logging.WARNING, logger="pyzm"):
             cfg = DetectorConfig.from_dict(
