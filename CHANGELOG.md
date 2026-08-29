@@ -3,6 +3,29 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.5.2] - 2026-08-29
+
+### Bug Fixes
+
+- retry the GPU after a CUDA failure instead of pinning to CPU ([65f83a7](https://github.com/ZoneMinder/pyzmNg/commit/65f83a79d6a4e629d0573e01253214e6036fb7d8))
+
+### Documentation
+
+- correct zone_match_strategy placement, export the enum ([8bb979b](https://github.com/ZoneMinder/pyzmNg/commit/8bb979b1afeee46dc0a7ba310d5f3d4e554723d2))
+
+### Features
+
+- report the processor each model is running on ([37e4ad3](https://github.com/ZoneMinder/pyzmNg/commit/37e4ad392df07a7c621a4523dea84e9611bade9b))
+- make zone resolution selectable with zone_match_strategy ([270eaf6](https://github.com/ZoneMinder/pyzmNg/commit/270eaf637c77c910c9b6497454eff8d22d45109b))
+
+### Miscellaneous
+
+- bump version to v2.5.2 ([ad84827](https://github.com/ZoneMinder/pyzmNg/commit/ad84827d970cdfcdb9d495947e7c9f59a25d3750))
+
+### Refactoring
+
+- drop the unreachable retry flag on the CPU fallback ([9a687d3](https://github.com/ZoneMinder/pyzmNg/commit/9a687d33cc9e93c563148604f43330825406722a))
+
 ## [2.5.1] - 2026-07-30
 
 ### Bug Fixes
@@ -14,6 +37,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- update CHANGELOG for v2.5.1 ([42886bb](https://github.com/ZoneMinder/pyzmNg/commit/42886bba145774f9be76a4c5d65412aa67fd487e))
 - point at pyzmng.readthedocs.io and connect the remote sections ([b9dd2e9](https://github.com/ZoneMinder/pyzmNg/commit/b9dd2e97aae52c0837f2d23e1d811513ad4beeec))
 - say why the models shorthand serves YOLO but not faces ([33eec7d](https://github.com/ZoneMinder/pyzmNg/commit/33eec7dd3cae6d7a26c2c1af766c79c58625d756))
 
