@@ -4,9 +4,11 @@ Ensures that Python bools (True/False) and string values ('yes'/'no')
 are both handled correctly by config parsing.
 """
 
+import logging
+
 import pytest
 
-from pyzm.models.config import DetectorConfig, _bool
+from pyzm.models.config import DetectorConfig, ZoneMatchStrategy, _bool
 
 
 # ---------------------------------------------------------------------------
@@ -315,3 +317,44 @@ class TestMonitorIdAndImagePath:
     def test_image_path_default(self):
         cfg = DetectorConfig.from_dict(_minimal_ml_options())
         assert cfg.image_path == "/var/lib/zmeventnotification/images"
+
+
+# ---------------------------------------------------------------------------
+# zone_match_strategy  (Ref: ZoneMinder/pyzmNg#68)
+# ---------------------------------------------------------------------------
+
+class TestZoneMatchStrategy:
+    def test_default_is_any_matching(self):
+        cfg = DetectorConfig.from_dict(_minimal_ml_options())
+        assert cfg.zone_match_strategy is ZoneMatchStrategy.ANY_MATCHING
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("any_matching", ZoneMatchStrategy.ANY_MATCHING),
+            ("first_intersecting", ZoneMatchStrategy.FIRST_INTERSECTING),
+            ("largest_overlap", ZoneMatchStrategy.LARGEST_OVERLAP),
+        ],
+    )
+    def test_parsed_from_general(self, value, expected):
+        cfg = DetectorConfig.from_dict(
+            _minimal_ml_options(global_general_extras={"zone_match_strategy": value})
+        )
+        assert cfg.zone_match_strategy is expected
+
+    def test_unknown_value_raises(self):
+        with pytest.raises(ValueError):
+            DetectorConfig.from_dict(
+                _minimal_ml_options(global_general_extras={"zone_match_strategy": "closest"})
+            )
+
+    def test_per_type_section_warns_global_only(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="pyzm"):
+            cfg = DetectorConfig.from_dict(
+                _minimal_ml_options(
+                    section_general_extras={"zone_match_strategy": "largest_overlap"}
+                )
+            )
+        assert "zone_match_strategy" in caplog.text
+        # Per-type value is ignored; the global default stands.
+        assert cfg.zone_match_strategy is ZoneMatchStrategy.ANY_MATCHING

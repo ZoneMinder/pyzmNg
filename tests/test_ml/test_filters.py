@@ -176,6 +176,249 @@ class TestFilterByZone:
         assert len(kept) == 1
 
 
+
+# ===================================================================
+# TestFilterByZoneStrategies  (Ref: ZoneMinder/pyzmNg#68)
+# ===================================================================
+
+# The real-world sliver case from the issue: a car in the street on a
+# 1920x1080 front-porch camera.  "street" holds 70.7% of the box and
+# rejects it by pattern; "drivewayfar" clips 10.4% of the box and is
+# patternless, so under "any_matching" it rescues a detection the
+# operator meant to exclude.
+_CAR_IN_STREET = (1554, 59, 1718, 167)
+_FRAME = (1080, 1920)
+
+
+def _street(pattern: str | None = "(NeverMatchThis)", ignore: str | None = None) -> dict:
+    return {
+        "name": "street",
+        "points": [(1489, 84), (1919, 86), (1919, 296), (1483, 107)],
+        "pattern": pattern,
+        "ignore_pattern": ignore,
+    }
+
+
+def _driveway_far(pattern: str | None = None, ignore: str | None = None) -> dict:
+    return {
+        "name": "drivewayfar",
+        "points": [(1446, 86), (1483, 92), (1912, 294), (1912, 345), (1424, 246), (1394, 244)],
+        "pattern": pattern,
+        "ignore_pattern": ignore,
+    }
+
+
+def _porch() -> dict:
+    """Large zone that does NOT intersect the car box."""
+    return {
+        "name": "porch",
+        "points": [(0, 0), (546, 2), (595, 256), (1426, 244), (1919, 347), (1919, 1079), (0, 1079)],
+        "pattern": None,
+    }
+
+
+@pytest.mark.integration
+class TestFilterByZoneStrategies:
+    """Zone-resolution strategies. Requires shapely."""
+
+    # -- any_matching (default, pre-2.6 behaviour) --
+
+    def test_default_strategy_lets_a_sliver_zone_rescue(self):
+        """Default is any_matching: drivewayfar rescues what street rejected."""
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+
+        kept, error_boxes = filter_by_zone(dets, [_street(), _driveway_far()], _FRAME)
+        assert [d.label for d in kept] == ["car"]
+        assert error_boxes == []
+
+    def test_any_matching_explicit_matches_default(self):
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+
+        kept, error_boxes = filter_by_zone(
+            dets, [_street(), _driveway_far()], _FRAME, strategy="any_matching",
+        )
+        assert [d.label for d in kept] == ["car"]
+        assert error_boxes == []
+
+    # -- first_intersecting (pyzm 0.3.x / ES 6 parity) --
+
+    def test_first_intersecting_rejection_is_terminal(self):
+        """street decides and rejects; drivewayfar never gets a say."""
+        from pyzm.ml.filters import filter_by_zone
+
+        det = _det("car", *_CAR_IN_STREET)
+
+        kept, error_boxes = filter_by_zone(
+            [det], [_street(), _driveway_far()], _FRAME, strategy="first_intersecting",
+        )
+        assert kept == []
+        assert error_boxes == [det.bbox]
+
+    def test_first_intersecting_skips_non_intersecting_zones(self):
+        """A zone the box misses does not get to decide."""
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+
+        kept, _ = filter_by_zone(
+            dets, [_porch(), _street(), _driveway_far()], _FRAME,
+            strategy="first_intersecting",
+        )
+        assert kept == []
+
+    def test_first_intersecting_is_order_dependent(self):
+        """Reversing zone order flips the outcome -- the documented drawback."""
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+
+        kept, error_boxes = filter_by_zone(
+            dets, [_driveway_far(), _street()], _FRAME, strategy="first_intersecting",
+        )
+        assert [d.label for d in kept] == ["car"]
+        assert error_boxes == []
+
+    def test_first_intersecting_ignore_pattern_is_terminal(self):
+        """ignore_pattern in the deciding zone suppresses outright."""
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+        zones = [_street(pattern=None, ignore="(car|truck)"), _driveway_far()]
+
+        kept, error_boxes = filter_by_zone(dets, zones, _FRAME, strategy="first_intersecting")
+        assert kept == []
+        assert len(error_boxes) == 1
+
+    def test_first_intersecting_keeps_when_deciding_zone_matches(self):
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+        zones = [_street(pattern="(car|person)"), _driveway_far(pattern="(NeverMatchThis)")]
+
+        kept, error_boxes = filter_by_zone(dets, zones, _FRAME, strategy="first_intersecting")
+        assert [d.label for d in kept] == ["car"]
+        assert error_boxes == []
+
+    # -- largest_overlap --
+
+    def test_largest_overlap_rejects_when_dominant_zone_rejects(self):
+        """street covers 70.7% of the box, drivewayfar 10.4% -- street decides."""
+        from pyzm.ml.filters import filter_by_zone
+
+        det = _det("car", *_CAR_IN_STREET)
+
+        kept, error_boxes = filter_by_zone(
+            [det], [_street(), _driveway_far()], _FRAME, strategy="largest_overlap",
+        )
+        assert kept == []
+        assert error_boxes == [det.bbox]
+
+    def test_largest_overlap_is_order_independent(self):
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+
+        kept, _ = filter_by_zone(
+            dets, [_driveway_far(), _street()], _FRAME, strategy="largest_overlap",
+        )
+        assert kept == []
+
+    def test_largest_overlap_keeps_when_dominant_zone_matches(self):
+        """Swap the patterns: the dominant zone now accepts the car."""
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+        zones = [_street(pattern=None), _driveway_far(pattern="(NeverMatchThis)")]
+
+        kept, error_boxes = filter_by_zone(dets, zones, _FRAME, strategy="largest_overlap")
+        assert [d.label for d in kept] == ["car"]
+        assert error_boxes == []
+
+    def test_largest_overlap_ignores_non_intersecting_zones(self):
+        """A big zone the box misses cannot win -- drivewayfar decides."""
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+        zones = [_porch(), _driveway_far(pattern="(car|person)")]
+
+        kept, _ = filter_by_zone(dets, zones, _FRAME, strategy="largest_overlap")
+        assert [d.label for d in kept] == ["car"]
+
+    def test_largest_overlap_ignore_pattern_is_terminal(self):
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+        zones = [_street(pattern=None, ignore="(car|truck)"), _driveway_far()]
+
+        kept, error_boxes = filter_by_zone(dets, zones, _FRAME, strategy="largest_overlap")
+        assert kept == []
+        assert len(error_boxes) == 1
+
+    def test_largest_overlap_tie_goes_to_first_zone(self):
+        """Two identical polygons: the earlier one decides."""
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("dog", 10, 10, 40, 40)]
+        square = [(0, 0), (50, 0), (50, 50), (0, 50)]
+        zones = [
+            {"name": "first", "points": square, "pattern": "person"},
+            {"name": "second", "points": square, "pattern": "dog"},
+        ]
+
+        kept, _ = filter_by_zone(dets, zones, (100, 100), strategy="largest_overlap")
+        assert kept == []
+
+    # -- shared behaviour --
+
+    @pytest.mark.parametrize(
+        "strategy", ["any_matching", "first_intersecting", "largest_overlap"],
+    )
+    def test_detection_outside_every_zone_is_dropped(self, strategy):
+        from pyzm.ml.filters import filter_by_zone
+
+        det = _det("car", 10, 10, 40, 40)
+
+        kept, error_boxes = filter_by_zone([det], [_street()], _FRAME, strategy=strategy)
+        assert kept == []
+        assert error_boxes == [det.bbox]
+
+    @pytest.mark.parametrize(
+        "strategy", ["any_matching", "first_intersecting", "largest_overlap"],
+    )
+    def test_empty_zone_list_passes_everything(self, strategy):
+        from pyzm.ml.filters import filter_by_zone
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+
+        kept, error_boxes = filter_by_zone(dets, [], _FRAME, strategy=strategy)
+        assert kept == dets
+        assert error_boxes == []
+
+    def test_strategy_accepts_enum(self):
+        from pyzm.ml.filters import filter_by_zone
+        from pyzm.models.config import ZoneMatchStrategy
+
+        dets = [_det("car", *_CAR_IN_STREET)]
+
+        kept, _ = filter_by_zone(
+            dets, [_street(), _driveway_far()], _FRAME,
+            strategy=ZoneMatchStrategy.LARGEST_OVERLAP,
+        )
+        assert kept == []
+
+    def test_unknown_strategy_raises(self):
+        from pyzm.ml.filters import filter_by_zone
+
+        with pytest.raises(ValueError):
+            filter_by_zone(
+                [_det("car", *_CAR_IN_STREET)], [_street()], _FRAME,
+                strategy="closest_zone",
+            )
+
 # ===================================================================
 # TestFilterBySize
 # ===================================================================

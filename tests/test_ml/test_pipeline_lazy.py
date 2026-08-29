@@ -122,7 +122,7 @@ class TestPrepare:
         backend.name = "test"
         backend.detect.return_value = [_det("person")]
         mock_create.return_value = backend
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(models=[_make_mc()], match_strategy=MatchStrategy.FIRST)
 

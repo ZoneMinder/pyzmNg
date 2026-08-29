@@ -65,6 +65,20 @@ class MatchStrategy(str, Enum):
     UNION = "union"
 
 
+class ZoneMatchStrategy(str, Enum):
+    """How a detection intersecting several zones is resolved.
+
+    Zone matching is bounding-box *intersection*, not containment, so a box
+    can straddle zones with conflicting patterns.  See ZoneMinder/pyzmNg#68.
+    """
+    #: Keep as soon as any intersecting zone's pattern matches (pre-2.6 default).
+    ANY_MATCHING = "any_matching"
+    #: The first intersecting zone decides, keep or reject (pyzm 0.3.x / ES 6).
+    FIRST_INTERSECTING = "first_intersecting"
+    #: The zone covering most of the box decides.  Order-independent.
+    LARGEST_OVERLAP = "largest_overlap"
+
+
 class FrameStrategy(str, Enum):
     """How to pick the *best* frame across all analysed frames."""
     FIRST = "first"
@@ -186,7 +200,7 @@ class TypeOverrides(BaseModel):
 
 
 # Keys that may appear in section_general but only have global meaning.
-_GLOBAL_ONLY_KEYS = frozenset({"frame_strategy", "image_path"})
+_GLOBAL_ONLY_KEYS = frozenset({"frame_strategy", "image_path", "zone_match_strategy"})
 
 
 class DetectorConfig(BaseModel):
@@ -198,6 +212,7 @@ class DetectorConfig(BaseModel):
     # Global overrides (applied to all models unless overridden per-model)
     max_detection_size: str | None = None
     pattern: str = ".*"
+    zone_match_strategy: ZoneMatchStrategy = ZoneMatchStrategy.ANY_MATCHING
 
     # Past-detection matching
     match_past_detections: bool = False
@@ -274,6 +289,9 @@ class DetectorConfig(BaseModel):
             frame_strategy=frame_strat,
             max_detection_size=general.get("max_detection_size"),
             pattern=general.get("pattern", ".*"),
+            zone_match_strategy=ZoneMatchStrategy(
+                general.get("zone_match_strategy", ZoneMatchStrategy.ANY_MATCHING.value)
+            ),
             match_past_detections=_bool(general.get("match_past_detections")),
             past_det_max_diff_area=general.get("past_det_max_diff_area", "5%"),
             past_det_max_diff_area_labels=label_area_overrides,

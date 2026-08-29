@@ -12,6 +12,7 @@ import os
 import re
 from typing import TYPE_CHECKING
 
+from pyzm.models.config import ZoneMatchStrategy
 from pyzm.models.detection import BBox, Detection
 
 if TYPE_CHECKING:
@@ -24,10 +25,134 @@ logger = logging.getLogger("pyzm.ml")
 # Zone filtering
 # ---------------------------------------------------------------------------
 
+def _zone_points(zone: dict) -> list:
+    """Polygon points of *zone*, accepting either the ``points`` or ``value`` key."""
+    return zone.get("points") or zone.get("value", [])
+
+
+def _zone_verdict(det: Detection, zone: dict) -> bool:
+    """Apply *zone*'s patterns to *det*.  ``True`` keeps the detection.
+
+    Used by the strategies where a single zone decides the outcome:
+    ``ignore_pattern`` suppresses, then ``pattern`` (default ``.*``) keeps.
+    """
+    zone_name = zone.get("name", "unnamed")
+    zone_ignore = zone.get("ignore_pattern")
+    if zone_ignore and re.match(zone_ignore, det.label):
+        logger.debug(
+            "filter_by_zone: %s matches ignore_pattern %s of deciding zone %s, suppressing",
+            det.label, zone_ignore, zone_name,
+        )
+        return False
+
+    pattern = zone.get("pattern") or ".*"
+    if re.match(pattern, det.label):
+        logger.debug(
+            "filter_by_zone: %s matches pattern %s of deciding zone %s",
+            det.label, pattern, zone_name,
+        )
+        return True
+
+    logger.debug(
+        "filter_by_zone: %s does NOT match pattern %s of deciding zone %s, rejecting",
+        det.label, pattern, zone_name,
+    )
+    return False
+
+
+def _keep_any_matching(det: Detection, bbox_poly, zones: list[dict], Polygon) -> bool:
+    """Keep as soon as any intersecting zone's pattern matches."""
+    for zone in zones:
+        zone_name = zone.get("name", "unnamed")
+        zone_poly = Polygon(_zone_points(zone))
+        if not bbox_poly.intersects(zone_poly):
+            logger.debug(
+                "filter_by_zone: %s does NOT intersect zone %s",
+                det.label, zone_name,
+            )
+            continue
+
+        # Check ignore_pattern first -- suppress matching labels in this zone
+        zone_ignore = zone.get("ignore_pattern")
+        if zone_ignore and re.match(zone_ignore, det.label):
+            logger.debug(
+                "filter_by_zone: %s intersects zone %s and matches ignore_pattern %s, suppressing",
+                det.label, zone_name, zone_ignore,
+            )
+            continue  # try other zones
+
+        # Zone intersects -- now check the pattern
+        pattern = zone.get("pattern") or ".*"
+        if re.match(pattern, det.label):
+            logger.debug(
+                "filter_by_zone: %s intersects zone %s and matches pattern %s",
+                det.label, zone_name, pattern,
+            )
+            return True  # matched on first zone is enough
+
+        logger.debug(
+            "filter_by_zone: %s intersects zone %s but does NOT match pattern %s",
+            det.label, zone_name, pattern,
+        )
+    return False
+
+
+def _keep_first_intersecting(det: Detection, bbox_poly, zones: list[dict], Polygon) -> bool:
+    """The first zone the box intersects decides, whether or not it matches."""
+    for zone in zones:
+        zone_poly = Polygon(_zone_points(zone))
+        if not bbox_poly.intersects(zone_poly):
+            logger.debug(
+                "filter_by_zone: %s does NOT intersect zone %s",
+                det.label, zone.get("name", "unnamed"),
+            )
+            continue
+        return _zone_verdict(det, zone)
+    return False
+
+
+def _keep_largest_overlap(det: Detection, bbox_poly, zones: list[dict], Polygon) -> bool:
+    """The zone covering most of the bounding box decides.  Ties go to the
+    earlier zone."""
+    best_zone: dict | None = None
+    best_area = -1.0
+
+    for zone in zones:
+        zone_poly = Polygon(_zone_points(zone))
+        if not bbox_poly.intersects(zone_poly):
+            logger.debug(
+                "filter_by_zone: %s does NOT intersect zone %s",
+                det.label, zone.get("name", "unnamed"),
+            )
+            continue
+        area = bbox_poly.intersection(zone_poly).area
+        if area > best_area:
+            best_zone, best_area = zone, area
+
+    if best_zone is None:
+        return False
+
+    box_area = bbox_poly.area
+    logger.debug(
+        "filter_by_zone: zone %s covers most of %s (%.1f%% of the box), it decides",
+        best_zone.get("name", "unnamed"), det.label,
+        (best_area / box_area * 100) if box_area else 0.0,
+    )
+    return _zone_verdict(det, best_zone)
+
+
+_ZONE_STRATEGIES = {
+    ZoneMatchStrategy.ANY_MATCHING: _keep_any_matching,
+    ZoneMatchStrategy.FIRST_INTERSECTING: _keep_first_intersecting,
+    ZoneMatchStrategy.LARGEST_OVERLAP: _keep_largest_overlap,
+}
+
+
 def filter_by_zone(
     detections: list[Detection],
     zones: list[dict],
     image_shape: tuple[int, int],
+    strategy: ZoneMatchStrategy | str = ZoneMatchStrategy.ANY_MATCHING,
 ) -> tuple[list[Detection], list[BBox]]:
     """Keep only detections whose bounding box intersects at least one zone.
 
@@ -37,18 +162,35 @@ def filter_by_zone(
         Raw detections from a backend.
     zones:
         Each zone is a dict-like with ``name`` (str), ``points``
-        (list of (x, y) tuples), and optionally ``pattern`` (str | None).
-        These can be :class:`pyzm.models.zm.Zone` objects turned into dicts
-        via :meth:`as_dict`, or simple dicts.
+        (list of (x, y) tuples), and optionally ``pattern`` (str | None) and
+        ``ignore_pattern`` (str | None).  These can be
+        :class:`pyzm.models.zm.Zone` objects turned into dicts via
+        :meth:`as_dict`, or simple dicts.
     image_shape:
-        ``(height, width)`` of the analysed image.  If *zones* is empty a
-        full-image zone is synthesised.
+        ``(height, width)`` of the analysed image.
+    strategy:
+        How to resolve a box that intersects several zones
+        (:class:`~pyzm.models.config.ZoneMatchStrategy`):
+
+        ``any_matching`` (default)
+            Keep as soon as any intersecting zone's ``pattern`` matches.  A
+            zone that rejects the detection does not stop a later zone from
+            keeping it.
+        ``first_intersecting``
+            The first intersecting zone decides, keep or reject.  This is the
+            pyzm 0.3.x / ES 6 behaviour.  Order-dependent.
+        ``largest_overlap``
+            The zone covering the largest share of the bounding box decides.
+            Order-independent; ties go to the earlier zone.
+
+        Under the latter two, a rejection -- by ``ignore_pattern`` or by a
+        ``pattern`` mismatch -- is final, so an exclusion zone cannot be
+        overridden by a zone the box merely clips.
 
     Returns
     -------
     kept:
-        Detections that intersect at least one zone and whose label matches
-        the zone's pattern (or the default ``.*``).
+        Detections kept by the deciding zone(s).
     error_boxes:
         Bounding boxes of detections that were filtered out.
     """
@@ -58,55 +200,16 @@ def filter_by_zone(
 
     from shapely.geometry import Polygon  # optional dependency
 
-    h, w = image_shape
+    keep_fn = _ZONE_STRATEGIES[ZoneMatchStrategy(strategy)]
 
     kept: list[Detection] = []
     error_boxes: list[BBox] = []
 
     for det in detections:
         bbox_poly = Polygon(det.bbox.as_polygon_coords())
-        matched = False
-
-        for zone in zones:
-            # Normalise: accept Zone objects or dicts with 'value'/'points' key
-            zone_points = zone.get("points") or zone.get("value", [])
-            zone_pattern = zone.get("pattern")
-            zone_ignore = zone.get("ignore_pattern")
-            zone_name = zone.get("name", "unnamed")
-
-            zone_poly = Polygon(zone_points)
-            if not bbox_poly.intersects(zone_poly):
-                logger.debug(
-                    "filter_by_zone: %s does NOT intersect zone %s",
-                    det.label, zone_name,
-                )
-                continue
-
-            # Check ignore_pattern first -- suppress matching labels in this zone
-            if zone_ignore and re.match(zone_ignore, det.label):
-                logger.debug(
-                    "filter_by_zone: %s intersects zone %s and matches ignore_pattern %s, suppressing",
-                    det.label, zone_name, zone_ignore,
-                )
-                continue  # try other zones
-
-            # Zone intersects -- now check the pattern
-            pattern = zone_pattern or ".*"
-            if re.match(pattern, det.label):
-                logger.debug(
-                    "filter_by_zone: %s intersects zone %s and matches pattern %s",
-                    det.label, zone_name, pattern,
-                )
-                kept.append(det)
-                matched = True
-                break  # matched on first zone is enough
-            else:
-                logger.debug(
-                    "filter_by_zone: %s intersects zone %s but does NOT match pattern %s",
-                    det.label, zone_name, pattern,
-                )
-
-        if not matched:
+        if keep_fn(det, bbox_poly, zones, Polygon):
+            kept.append(det)
+        else:
             error_boxes.append(det.bbox)
 
     return kept, error_boxes

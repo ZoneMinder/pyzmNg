@@ -13,6 +13,7 @@ from pyzm.models.config import (
     ModelFramework,
     ModelType,
     TypeOverrides,
+    ZoneMatchStrategy,
 )
 from pyzm.models.detection import BBox, Detection, DetectionResult
 
@@ -64,7 +65,7 @@ class TestModelPipeline:
         mock_create.return_value = mock_backend
 
         # Zone filter passes everything through
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(models=[mc], match_strategy=MatchStrategy.FIRST)
 
@@ -91,7 +92,7 @@ class TestModelPipeline:
         backend2 = _make_mock_backend("model2", [_det("car", model="model2"), _det("truck", model="model2")])
 
         mock_create.side_effect = [backend1, backend2]
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(
             models=[mc1, mc2],
@@ -123,7 +124,7 @@ class TestModelPipeline:
         backend2 = _make_mock_backend("model2", [_det("car", model="model2"), _det("truck", model="model2")])
 
         mock_create.side_effect = [backend1, backend2]
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(
             models=[mc1, mc2],
@@ -152,7 +153,7 @@ class TestModelPipeline:
         backend2 = _make_mock_backend("model2", [_det("car", model="model2")])
 
         mock_create.side_effect = [backend1, backend2]
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(
             models=[mc1, mc2],
@@ -184,7 +185,7 @@ class TestModelPipeline:
         backend_face = _make_mock_backend("dlib", [_det("John", model="dlib")])
 
         mock_create.side_effect = [backend_obj, backend_face]
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(
             models=[mc_obj, mc_face],
@@ -216,7 +217,7 @@ class TestModelPipeline:
         backend_face = _make_mock_backend("dlib", [_det("John", model="dlib")])
 
         mock_create.side_effect = [backend_obj, backend_face]
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(
             models=[mc_obj, mc_face],
@@ -269,7 +270,7 @@ class TestModelPipeline:
         good_backend = _make_mock_backend("good_model", [_det("person")])
 
         mock_create.side_effect = [bad_backend, good_backend]
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(
             models=[mc1, mc2],
@@ -300,7 +301,7 @@ class TestModelPipeline:
         backend2 = _make_mock_backend("model2", [_det("person"), _det("car")])
 
         mock_create.side_effect = [backend1, backend2]
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(
             models=[mc1, mc2],
@@ -356,7 +357,7 @@ class TestZoneRescaling:
         mc = _make_model_config("test")
         backend = _make_mock_backend("test", [_det("person")])
         mock_create.return_value = backend
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(models=[mc])
         pipeline = ModelPipeline(config)
@@ -392,7 +393,7 @@ class TestZoneRescaling:
         mc = _make_model_config("test")
         backend = _make_mock_backend("test", [_det("person")])
         mock_create.return_value = backend
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(models=[mc])
         pipeline = ModelPipeline(config)
@@ -417,7 +418,7 @@ class TestZoneRescaling:
         mc = _make_model_config("test")
         backend = _make_mock_backend("test", [_det("person")])
         mock_create.return_value = backend
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(models=[mc])
         pipeline = ModelPipeline(config)
@@ -457,7 +458,7 @@ class TestPerTypeConfig:
         backend_face2 = _make_mock_backend("face2", [_det("Bob", model="face2")])
 
         mock_create.side_effect = [backend_obj1, backend_obj2, backend_face1, backend_face2]
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(
             models=[mc_obj1, mc_obj2, mc_face1, mc_face2],
@@ -510,7 +511,7 @@ class TestPerTypeConfig:
         ])
 
         mock_create.side_effect = [backend_obj, backend_face]
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         # Saved past detection: "person" at exact same bbox
         mock_load.return_value = ([[10, 10, 50, 50]], ["person"])
@@ -594,7 +595,7 @@ class TestAudioContext:
         mock_backend = _make_mock_backend("BirdNET", [])
         mock_backend.detect_audio = MagicMock(return_value=audio_dets)
         mock_create.return_value = mock_backend
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(models=[mc], match_strategy=MatchStrategy.FIRST)
         pipeline = ModelPipeline(config)
@@ -628,7 +629,7 @@ class TestAudioContext:
         mock_backend = _make_mock_backend("BirdNET", [])
         mock_backend.detect_audio = MagicMock()
         mock_create.return_value = mock_backend
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(models=[mc], match_strategy=MatchStrategy.FIRST)
         pipeline = ModelPipeline(config)
@@ -667,7 +668,7 @@ class TestAudioContext:
         backend_audio.detect_audio = MagicMock(return_value=audio_dets)
 
         mock_create.side_effect = [backend_obj, backend_audio]
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(
             models=[mc_obj, mc_audio],
@@ -700,7 +701,7 @@ class TestAudioContext:
         mock_backend = _make_mock_backend("BirdNET", [])
         mock_backend.detect_audio = MagicMock(side_effect=RuntimeError("BirdNET crashed"))
         mock_create.return_value = mock_backend
-        mock_zone_filter.side_effect = lambda dets, zones, shape: (dets, [])
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
 
         config = DetectorConfig(models=[mc], match_strategy=MatchStrategy.FIRST)
         pipeline = ModelPipeline(config)
@@ -712,3 +713,64 @@ class TestAudioContext:
         # Should NOT raise
         result = pipeline.run(mock_image)
         assert result.detections == []
+
+
+# ===================================================================
+# TestZoneMatchStrategyWiring  (Ref: ZoneMinder/pyzmNg#68)
+# ===================================================================
+
+@pytest.mark.integration
+class TestZoneMatchStrategyWiring:
+    """The configured zone_match_strategy reaches the real zone filter.
+
+    Real filter_by_zone here (needs shapely) -- only the backend is mocked.
+    Scenario is the issue's sliver case: a car whose box sits mostly in a
+    zone that rejects it and clips a patternless zone that would rescue it.
+    """
+
+    @staticmethod
+    def _zones():
+        from pyzm.models.zm import Zone
+        return [
+            Zone(name="street",
+                 points=[(1489, 84), (1919, 86), (1919, 296), (1483, 107)],
+                 pattern="(NeverMatchThis)"),
+            Zone(name="drivewayfar",
+                 points=[(1446, 86), (1483, 92), (1912, 294), (1912, 345),
+                         (1424, 246), (1394, 244)]),
+        ]
+
+    def _run(self, mock_create, strategy):
+        from pyzm.ml.pipeline import ModelPipeline
+
+        mc = _make_model_config("yolo")
+        mock_create.return_value = _make_mock_backend(
+            "yolo", [_det("car", 1554, 59, 1718, 167)],
+        )
+        config = DetectorConfig(
+            models=[mc], match_strategy=MatchStrategy.FIRST,
+            zone_match_strategy=strategy,
+        )
+        pipeline = ModelPipeline(config)
+
+        mock_image = MagicMock()
+        mock_image.shape = (1080, 1920, 3)
+        return pipeline.run(mock_image, zones=self._zones())
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_default_any_matching_keeps(self, mock_create):
+        result = self._run(mock_create, ZoneMatchStrategy.ANY_MATCHING)
+        assert [d.label for d in result.detections] == ["car"]
+        assert result.error_boxes == []
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_largest_overlap_drops(self, mock_create):
+        result = self._run(mock_create, ZoneMatchStrategy.LARGEST_OVERLAP)
+        assert result.detections == []
+        assert len(result.error_boxes) == 1
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_first_intersecting_drops(self, mock_create):
+        result = self._run(mock_create, ZoneMatchStrategy.FIRST_INTERSECTING)
+        assert result.detections == []
+        assert len(result.error_boxes) == 1
