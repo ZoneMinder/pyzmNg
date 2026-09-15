@@ -56,7 +56,7 @@ class TestDarknetOnOpenCV5:
         msg = str(exc.value)
         assert "Darknet importer" in msg
         assert "5.1.0-dev" in msg          # the version actually installed
-        assert "4.13" in msg               # the newest version that works
+        assert '"opencv-contrib-python<5"' in msg  # a version that works
         assert "ONNX" in msg               # the alternative
         assert "YoloV4 GPU/CPU" in msg     # which model failed
         assert "yolov4.weights" in msg     # and which file

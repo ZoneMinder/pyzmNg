@@ -660,13 +660,14 @@ factory — you just set ``framework: opencv`` and the right backend is chosen.
    OpenCV 4.x. Loading a ``.weights`` model on OpenCV 5 raises::
 
       YoloV4: OpenCV 5.1.0-dev removed the Darknet importer, so
-      '/path/to/yolov4.weights' can no longer be loaded. Use OpenCV 4.13.x, the
-      newest release that still reads Darknet models, or convert this model to
-      ONNX and run it as YOLOv11 or YOLOv26.
+      '/path/to/yolov4.weights' can no longer be loaded. Use a 4.x OpenCV
+      (pip install "opencv-contrib-python<5"), or convert this model to ONNX
+      and run it as YOLOv11 or YOLOv26.
 
    ``YoloOnnx`` is unaffected: it uses ``readNetFromONNX``, which OpenCV 5 still
-   provides. This most often bites when rebuilding OpenCV for a recent CUDA
-   release, which pulls in OpenCV 5 by default.
+   provides. This bites two ways: rebuilding OpenCV for a recent CUDA release
+   picks up OpenCV 5 sources, and PyPI now serves OpenCV 5 wheels, so a plain
+   ``pip install opencv-contrib-python`` installs one.
 
 
 Match and frame strategies

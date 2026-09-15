@@ -42,9 +42,8 @@ class YoloDarknet(YoloBase):
             raise RuntimeError(
                 f"{self.name}: OpenCV {cv2.__version__} removed the Darknet "
                 f"importer, so '{self._config.weights}' can no longer be loaded. "
-                f"Use OpenCV 4.13.x, the newest release that still reads Darknet "
-                f"models, or convert this model to ONNX and run it as YOLOv11 or "
-                f"YOLOv26."
+                f"Use a 4.x OpenCV (pip install \"opencv-contrib-python<5\"), or "
+                f"convert this model to ONNX and run it as YOLOv11 or YOLOv26."
             )
 
         _t0 = _time.perf_counter()
