@@ -32,11 +32,25 @@ class YoloDarknet(YoloBase):
         import cv2
 
         logger.debug('|--------- Loading "%s" model from disk -------------|', self.name)
+        cv2_ver = _cv2_version()
+
+        # OpenCV 5 removed the Darknet importer. readNet() would raise a
+        # cv2.error that names neither the model nor a working version, so
+        # fail here with something the user can act on. ONNX models are
+        # unaffected — readNetFromONNX still exists. Refs #70
+        if cv2_ver >= (5, 0, 0):
+            raise RuntimeError(
+                f"{self.name}: OpenCV {cv2.__version__} removed the Darknet "
+                f"importer, so '{self._config.weights}' can no longer be loaded. "
+                f"Use OpenCV 4.13.x, the newest release that still reads Darknet "
+                f"models, or convert this model to ONNX and run it as YOLOv11 or "
+                f"YOLOv26."
+            )
+
         _t0 = _time.perf_counter()
         self.net = cv2.dnn.readNet(self._config.weights, self._config.config)
         diff_time = f"{(_time.perf_counter() - _t0) * 1000:.2f} ms"
 
-        cv2_ver = _cv2_version()
         if cv2_ver >= (4, 5, 4):
             logger.debug(
                 "%s: OpenCV >= 4.5.4, fixing getUnconnectedOutLayers() API",

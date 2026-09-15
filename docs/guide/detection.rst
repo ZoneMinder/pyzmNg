@@ -627,7 +627,8 @@ All backends implement the ``MLBackend`` interface (``load()``,
      - ONNX/Ultralytics YOLO models via OpenCV DNN (letterboxing, end-to-end support)
    * - YoloDarknet
      - ``opencv`` (``.weights``)
-     - Legacy Darknet YOLO models (``.weights`` + ``.cfg``) via OpenCV DNN
+     - Legacy Darknet YOLO models (``.weights`` + ``.cfg``) via OpenCV DNN.
+       Requires OpenCV 4.x — see the note below.
    * - CoralBackend
      - ``coral_edgetpu``
      - Google Coral EdgeTPU object detection via ``pycoral``
@@ -652,6 +653,20 @@ The YOLO backend is selected automatically based on the weights file extension:
 and 640px default input), while ``.weights`` files use ``YoloDarknet`` (with
 416px default input). This dispatch is handled by the ``create_yolo_backend()``
 factory — you just set ``framework: opencv`` and the right backend is chosen.
+
+.. important::
+
+   OpenCV 5.0 removed the Darknet importer, so ``YoloDarknet`` works only on
+   OpenCV 4.x. Loading a ``.weights`` model on OpenCV 5 raises::
+
+      YoloV4: OpenCV 5.1.0-dev removed the Darknet importer, so
+      '/path/to/yolov4.weights' can no longer be loaded. Use OpenCV 4.13.x, the
+      newest release that still reads Darknet models, or convert this model to
+      ONNX and run it as YOLOv11 or YOLOv26.
+
+   ``YoloOnnx`` is unaffected: it uses ``readNetFromONNX``, which OpenCV 5 still
+   provides. This most often bites when rebuilding OpenCV for a recent CUDA
+   release, which pulls in OpenCV 5 by default.
 
 
 Match and frame strategies
