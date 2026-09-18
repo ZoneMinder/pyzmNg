@@ -669,6 +669,11 @@ factory — you just set ``framework: opencv`` and the right backend is chosen.
    picks up OpenCV 5 sources, and PyPI now serves OpenCV 5 wheels, so a plain
    ``pip install opencv-contrib-python`` installs one.
 
+   Darknet is the only thing holding OpenCV below 5.0, so prefer the ONNX
+   models (YOLOv11, YOLOv26): they are more accurate, faster, and have no
+   upper OpenCV bound. Pin with ``pip install "opencv-contrib-python<5"`` only
+   for as long as you still run ``.weights`` models.
+
 
 Match and frame strategies
 ---------------------------

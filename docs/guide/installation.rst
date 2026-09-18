@@ -24,9 +24,10 @@ Requirements
 - Python 3.10 or newer
 - Pydantic >= 2.0
 - OpenCV 4.13+ (``cv2``) -- required for ML detection features (ONNX YOLO models need 4.13+ for full operator support).
-  Darknet models (``.weights`` + ``.cfg``, i.e. YOLOv4/YOLOv3) additionally require OpenCV **4.x**: OpenCV 5.0
-  removed the Darknet importer. To run both model types, use a 4.13 or newer 4.x release. PyPI now serves
-  OpenCV 5 wheels, so install it as ``pip install "opencv-contrib-python<5"`` if you use Darknet models.
+  Darknet models (``.weights`` + ``.cfg``, i.e. YOLOv4/YOLOv3) additionally require OpenCV **4.4 or newer but
+  below 5.0**: OpenCV 5.0 removed the Darknet importer. PyPI now serves OpenCV 5 wheels, so install it as
+  ``pip install "opencv-contrib-python<5"`` if you use Darknet models. Prefer the ONNX models (YOLOv11,
+  YOLOv26) — they are more accurate, faster, and carry no upper OpenCV bound.
 - A running ZoneMinder instance (for API features)
 
 Path A: Install from PyPI
