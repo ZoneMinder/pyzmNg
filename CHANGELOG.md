@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.5.3] - 2026-09-18
+
+### Bug Fixes
+
+- point the Darknet error at a 4.x OpenCV install ([f510a15](https://github.com/ZoneMinder/pyzmNg/commit/f510a15d1ab0d3f4af415856e7e484c920688f4b))
+- fail readably when OpenCV 5 drops Darknet support ([66e603f](https://github.com/ZoneMinder/pyzmNg/commit/66e603f398e52020dba85f006038723fe0bbb425))
+
+### Documentation
+
+- recommend ONNX models over Darknet for OpenCV headroom ([38d4463](https://github.com/ZoneMinder/pyzmNg/commit/38d4463e75d9c7f0219e13a72d4acf30aeb0b7e4))
+
+### Miscellaneous
+
+- bump version to v2.5.3 ([8d03c90](https://github.com/ZoneMinder/pyzmNg/commit/8d03c90c313dec58104495eb4f8c4fb43b24a879))
+
 ## [2.5.2] - 2026-08-29
 
 ### Bug Fixes
@@ -11,6 +26,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- update CHANGELOG for v2.5.2 ([f6db4a4](https://github.com/ZoneMinder/pyzmNg/commit/f6db4a4193b81d6a3cb469427a86ee18fb3f9c7e))
 - correct zone_match_strategy placement, export the enum ([8bb979b](https://github.com/ZoneMinder/pyzmNg/commit/8bb979b1afeee46dc0a7ba310d5f3d4e554723d2))
 
 ### Features
