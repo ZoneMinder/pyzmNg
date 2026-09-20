@@ -63,7 +63,15 @@ Event methods
    # Writes objdetect.jpg and objects.json to ev.path()
    # Use path_override="..." to write to a different directory
 
-``tag()``, ``path()``, and ``save_objdetect()`` (when no
+   # Save an animated GIF of the event (requires pyzm[ml] and OpenCV)
+   ev.save_animation()
+   # Writes objdetect.gif to ev.path(), as a contiguous run of frames
+   # centred near the event's highest-scoring frame.
+   # ZoneMinder may not have finished writing the event's JPEGs yet, so a
+   # caller that can afford to wait should ask for retries:
+   ev.save_animation(max_tries=4, retry_sleep=15)
+
+``tag()``, ``path()``, ``save_objdetect()`` and ``save_animation()`` (when no
 ``path_override`` is given) require a direct database connection.  By
 default, credentials are read from ``/etc/zm/zm.conf``.  If that file is
 not readable, pass ``db_user``, ``db_password``, etc. when creating the

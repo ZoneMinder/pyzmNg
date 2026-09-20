@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -2217,3 +2218,323 @@ class TestNotFoundNonePath:
         client = self._client(mock_zmapi_cls, None)
         with pytest.raises(ValueError, match="not found"):
             client._ptz_capabilities(999)
+
+
+# ===================================================================
+# TestBurstFrameIds
+# ===================================================================
+
+class TestBurstFrameIds:
+    """Tests for the contiguous frame window used by save_animation()."""
+
+    def test_window_is_centred_slightly_before_the_peak(self):
+        """The run-up to the peak is included, not just the aftermath."""
+        from pyzm.client import _burst_frame_ids
+
+        fids = _burst_frame_ids(total=100, centre=50, want=12)
+
+        assert fids == list(range(46, 58))
+        assert len(fids) == 12
+        assert 50 in fids
+        # More frames before the peak than after: an animation that starts at
+        # the peak shows only the departure, never the approach.
+        assert fids.index(50) > 0
+
+    def test_window_slides_back_when_the_peak_is_near_the_end(self):
+        """A peak near the end must not shorten the animation.
+
+        Clamping only the end of the window silently returns fewer frames than
+        asked for -- asking for 12 here would yield 6. The window has to slide
+        back inside the event instead.
+        """
+        from pyzm.client import _burst_frame_ids
+
+        fids = _burst_frame_ids(total=20, centre=19, want=12)
+
+        assert fids == list(range(9, 21))
+        assert len(fids) == 12
+
+    def test_window_never_starts_below_frame_one(self):
+        """A peak near the start clamps to fid 1, not to zero or a negative."""
+        from pyzm.client import _burst_frame_ids
+
+        fids = _burst_frame_ids(total=100, centre=2, want=12)
+
+        assert fids[0] == 1
+        assert len(fids) == 12
+
+    def test_event_shorter_than_the_window_yields_every_frame_once(self):
+        """Asking for more frames than the event has is not an error."""
+        from pyzm.client import _burst_frame_ids
+
+        fids = _burst_frame_ids(total=5, centre=3, want=12)
+
+        assert fids == [1, 2, 3, 4, 5]
+
+    def test_returns_none_without_a_frame_count(self):
+        """No frame count means no opinion -- caller uses the default set."""
+        from pyzm.client import _burst_frame_ids
+
+        assert _burst_frame_ids(total=0, centre=5, want=10) is None
+
+    def test_returns_none_without_a_peak_frame(self):
+        """No peak frame means no opinion -- caller uses the default set."""
+        from pyzm.client import _burst_frame_ids
+
+        assert _burst_frame_ids(total=100, centre=None, want=10) is None
+
+
+# ===================================================================
+# TestSaveAnimation
+# ===================================================================
+
+def _frame(width=320, height=240, fill=0):
+    """A distinguishable BGR frame, as extract_frames() returns."""
+    import numpy as np
+
+    img = np.zeros((height, width, 3), dtype=np.uint8)
+    img[:, :] = fill
+    return img
+
+
+def _animation_client(mock_zmapi_cls, frames_result):
+    """A ZMClient whose frame extraction (the HTTP boundary) is mocked."""
+    mock_zmapi_cls.return_value = _make_mock_api()
+
+    from pyzm import ZMClient
+    client = ZMClient(api_url="https://zm.example.com/zm/api")
+    client._get_event_frames = MagicMock(side_effect=frames_result)
+    return client
+
+
+class TestSaveAnimation:
+    """Tests for Event.save_animation() -- writing objdetect.gif."""
+
+    @patch("pyzm.client.ZMAPI")
+    def test_writes_an_animated_gif(self, mock_zmapi_cls, tmp_path):
+        """Every supplied frame lands in the GIF, with a real frame delay.
+
+        n_frames and duration are both asserted: a GIF written with the wrong
+        duration unit has no inter-frame delay and renders as a still image,
+        which is a correct-looking file with the wrong behaviour.
+        """
+        from PIL import Image
+
+        frames = [(i, _frame(fill=i * 20)) for i in range(1, 6)]
+        client = _animation_client(mock_zmapi_cls, [(frames, {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        eventpath = str(tmp_path / "events" / "100")
+
+        result = ev.save_animation(path_override=eventpath, frame_ms=200)
+
+        assert result == str(tmp_path / "events" / "100" / "objdetect.gif")
+        with Image.open(result) as gif:
+            assert gif.n_frames == 5
+            assert gif.info["duration"] == 200
+
+    @patch("pyzm.client.ZMAPI")
+    def test_requests_a_contiguous_burst_centred_on_the_peak(self, mock_zmapi_cls, tmp_path):
+        """Not the default snapshot/alarm/1 set, which is three unrelated images."""
+        frames = [(i, _frame()) for i in range(1, 11)]
+        client = _animation_client(mock_zmapi_cls, [(frames, {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        ev.save_animation(path_override=str(tmp_path), frames=12)
+
+        stream_config = client._get_event_frames.call_args[0][1]
+        assert stream_config is not None
+        assert stream_config.frame_set == [str(f) for f in range(21, 33)]
+
+    @patch("pyzm.client.ZMAPI")
+    def test_falls_back_to_the_default_frame_set_without_a_peak(self, mock_zmapi_cls, tmp_path):
+        """An event with no peak frame still produces an animation."""
+        from PIL import Image
+
+        frames = [(i, _frame(fill=i * 20)) for i in range(1, 4)]
+        client = _animation_client(mock_zmapi_cls, [(frames, {})])
+
+        ev = Event(id=100, frames=0, max_score_frame_id=None, _client=client)
+        result = ev.save_animation(path_override=str(tmp_path))
+
+        assert client._get_event_frames.call_args[0][1] is None
+        with Image.open(result) as gif:
+            assert gif.n_frames == 3
+
+    @patch("pyzm.client.ZMAPI")
+    def test_downscales_frames_wider_than_width(self, mock_zmapi_cls, tmp_path):
+        """A 1080p event does not become a multi-megabyte GIF."""
+        from PIL import Image
+
+        frames = [(i, _frame(width=1920, height=1080, fill=i * 20)) for i in range(1, 4)]
+        client = _animation_client(mock_zmapi_cls, [(frames, {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        result = ev.save_animation(path_override=str(tmp_path), width=640)
+
+        with Image.open(result) as gif:
+            assert gif.size == (640, 360)
+
+    @patch("pyzm.client.ZMAPI")
+    def test_does_not_upscale_frames_narrower_than_width(self, mock_zmapi_cls, tmp_path):
+        """Width is a ceiling, not a target."""
+        from PIL import Image
+
+        frames = [(i, _frame(width=320, height=240, fill=i * 20)) for i in range(1, 4)]
+        client = _animation_client(mock_zmapi_cls, [(frames, {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        result = ev.save_animation(path_override=str(tmp_path), width=640)
+
+        with Image.open(result) as gif:
+            assert gif.size == (320, 240)
+
+    @patch("pyzm.client.ZMAPI")
+    def test_skips_undecodable_frames(self, mock_zmapi_cls, tmp_path):
+        """A None frame is dropped rather than aborting the animation."""
+        from PIL import Image
+
+        frames = [(1, _frame(fill=20)), (2, None), (3, _frame(fill=60))]
+        client = _animation_client(mock_zmapi_cls, [(frames, {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        result = ev.save_animation(path_override=str(tmp_path))
+
+        with Image.open(result) as gif:
+            assert gif.n_frames == 2
+
+    @patch("pyzm.client.ZMAPI")
+    def test_renames_a_temp_file_into_place(self, mock_zmapi_cls, tmp_path):
+        """The GIF appears atomically.
+
+        PIL writes a GIF incrementally and a reader (zmNinja, a notification
+        script) genuinely overlaps the writer, so the final name must never
+        name a partially written file. Same directory, so this is a rename
+        rather than a copy.
+        """
+        frames = [(i, _frame(fill=i * 20)) for i in range(1, 4)]
+        client = _animation_client(mock_zmapi_cls, [(frames, {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+
+        with patch("pyzm.client.os.replace", wraps=os.replace) as replace:
+            result = ev.save_animation(path_override=str(tmp_path))
+
+        src, dst = replace.call_args[0]
+        assert dst == result
+        assert src != result
+        assert os.path.dirname(src) == os.path.dirname(result)
+
+    @patch("pyzm.client.ZMAPI")
+    def test_gif_is_world_readable(self, mock_zmapi_cls, tmp_path):
+        """www-data serves this file; an umask-derived mode can hide it."""
+        frames = [(i, _frame(fill=i * 20)) for i in range(1, 4)]
+        client = _animation_client(mock_zmapi_cls, [(frames, {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        result = ev.save_animation(path_override=str(tmp_path))
+
+        assert oct(os.stat(result).st_mode & 0o777) == oct(0o644)
+
+    @patch("pyzm.client.ZMAPI")
+    def test_retries_until_frames_are_available(self, mock_zmapi_cls, tmp_path):
+        """ZM may not have written the event's JPEGs when a hook runs."""
+        from PIL import Image
+
+        frames = [(i, _frame(fill=i * 20)) for i in range(1, 4)]
+        client = _animation_client(mock_zmapi_cls, [([], {}), (frames, {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        result = ev.save_animation(
+            path_override=str(tmp_path), max_tries=2, retry_sleep=0,
+        )
+
+        assert client._get_event_frames.call_count == 2
+        with Image.open(result) as gif:
+            assert gif.n_frames == 3
+
+    @patch("pyzm.client.ZMAPI")
+    def test_makes_exactly_one_attempt_by_default(self, mock_zmapi_cls, tmp_path):
+        """A library call does not sleep for 45s unless asked to."""
+        client = _animation_client(mock_zmapi_cls, [([], {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        result = ev.save_animation(path_override=str(tmp_path))
+
+        assert result is None
+        assert client._get_event_frames.call_count == 1
+
+    @patch("pyzm.client.ZMAPI")
+    def test_gives_up_leaving_no_partial_file(self, mock_zmapi_cls, tmp_path):
+        """Exhausting the retries leaves the directory as it was found."""
+        client = _animation_client(mock_zmapi_cls, [([], {}), ([], {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        result = ev.save_animation(
+            path_override=str(tmp_path), max_tries=2, retry_sleep=0,
+        )
+
+        assert result is None
+        assert list(tmp_path.iterdir()) == []
+
+    @patch("pyzm.client.ZMAPI")
+    def test_a_frame_fetch_error_is_retried_not_raised(self, mock_zmapi_cls, tmp_path):
+        """A transient API failure costs an attempt, not the caller's hook."""
+        from PIL import Image
+
+        frames = [(i, _frame(fill=i * 20)) for i in range(1, 4)]
+        client = _animation_client(
+            mock_zmapi_cls, [ConnectionError("boom"), (frames, {})],
+        )
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        result = ev.save_animation(
+            path_override=str(tmp_path), max_tries=2, retry_sleep=0,
+        )
+
+        with Image.open(result) as gif:
+            assert gif.n_frames == 3
+
+    @patch("pyzm.client.ZMAPI")
+    def test_honours_a_custom_filename(self, mock_zmapi_cls, tmp_path):
+        """Callers that write somewhere other than objdetect.gif can."""
+        frames = [(i, _frame(fill=i * 20)) for i in range(1, 4)]
+        client = _animation_client(mock_zmapi_cls, [(frames, {})])
+
+        ev = Event(id=100, frames=50, max_score_frame_id=25, _client=client)
+        result = ev.save_animation(path_override=str(tmp_path), fname="preview.gif")
+
+        assert result.endswith("/preview.gif")
+        assert os.path.exists(result)
+
+    @patch("pyzm.client.ZMAPI")
+    def test_uses_event_path_when_no_override(self, mock_zmapi_cls, tmp_path):
+        """save_animation resolves the event directory like save_objdetect."""
+        frames = [(i, _frame(fill=i * 20)) for i in range(1, 4)]
+        client = _animation_client(mock_zmapi_cls, [(frames, {})])
+        eventpath = str(tmp_path / "auto_path")
+        client._event_path = MagicMock(return_value=eventpath)
+
+        ev = Event(id=200, frames=50, max_score_frame_id=25, _client=client)
+        result = ev.save_animation()
+
+        assert result == os.path.join(eventpath, "objdetect.gif")
+        client._event_path.assert_called_once_with(200)
+
+    @patch("pyzm.client.ZMAPI")
+    def test_returns_none_when_no_path(self, mock_zmapi_cls):
+        """No resolvable event directory is not an error."""
+        mock_zmapi_cls.return_value = _make_mock_api()
+
+        from pyzm import ZMClient
+        client = ZMClient(api_url="https://zm.example.com/zm/api")
+        client._event_path = MagicMock(return_value=None)
+
+        ev = Event(id=100, _client=client)
+        assert ev.save_animation() is None
+
+    def test_requires_client(self):
+        """save_animation raises when Event has no client."""
+        ev = Event(id=1)
+        with pytest.raises(RuntimeError, match="not bound"):
+            ev.save_animation()

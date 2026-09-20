@@ -511,6 +511,118 @@ class ZMClient:
 
         return eventpath
 
+    def _save_animation(
+        self,
+        event: Event,
+        path_override: str | None = None,
+        *,
+        fname: str = "objdetect.gif",
+        frames: int = 10,
+        width: int = 640,
+        frame_ms: int = 200,
+        max_tries: int = 1,
+        retry_sleep: float = 15.0,
+    ) -> str | None:
+        """Write an animated GIF of an event to its directory.
+
+        Parameters are documented on :meth:`Event.save_animation`.
+
+        Returns the path written, or ``None`` when no event directory was
+        available or no frame could be decoded within ``max_tries``.
+        """
+        eventpath = path_override or self._event_path(event.id)
+        if not eventpath:
+            logger.debug("No event path available, skipping save_animation")
+            return None
+
+        os.makedirs(eventpath, exist_ok=True)
+        out_path = os.path.join(eventpath, fname)
+        # Written to a temp name in the same directory and renamed into place.
+        # PIL writes a GIF incrementally, and a reader -- zmNinja, or a
+        # notification script picking an image to attach -- can genuinely
+        # overlap the writer, so the final name must never refer to a
+        # partially written file. Same directory, so os.replace() is an atomic
+        # rename rather than a copy. The pid keeps two writers for one event
+        # from colliding, and the leading dot keeps a leaked temp file out of
+        # ZoneMinder's own directory listings.
+        tmp_path = os.path.join(eventpath, f".{fname}.{os.getpid()}.part")
+
+        for attempt in range(1, max_tries + 1):
+            try:
+                imgs = self._animation_images(event, frames, width)
+                if not imgs:
+                    raise ValueError("no decodable frames returned")
+
+                imgs[0].save(
+                    tmp_path,
+                    # Explicit: PIL infers the format from the file extension,
+                    # and the temp name ends in ".part".
+                    format="GIF",
+                    save_all=True,
+                    append_images=imgs[1:],
+                    duration=frame_ms,
+                    loop=0,
+                    optimize=True,
+                )
+                # Explicit rather than umask-dependent: www-data serves this
+                # file, and a temp file created under a stricter umask would
+                # keep that mode across the rename.
+                os.chmod(tmp_path, 0o644)
+                os.replace(tmp_path, out_path)
+                logger.debug(
+                    "Wrote animation to %s (%d frames @ %dms, attempt %d/%d)",
+                    out_path, len(imgs), frame_ms, attempt, max_tries,
+                )
+                return out_path
+            except Exception as e:
+                _unlink_quietly(tmp_path)
+                if attempt < max_tries:
+                    logger.debug(
+                        "Animation attempt %d/%d for event %s failed (%s), "
+                        "retrying in %ss",
+                        attempt, max_tries, event.id, e, retry_sleep,
+                    )
+                    time.sleep(retry_sleep)
+                else:
+                    logger.debug(
+                        "Animation attempt %d/%d for event %s failed (%s)",
+                        attempt, max_tries, event.id, e,
+                    )
+
+        # Deliberately no verdict beyond this: only the caller knows whether
+        # running out of attempts means "gave up" or "handed the rest to a
+        # background process".
+        return None
+
+    def _animation_images(self, event: Event, want: int, width: int) -> list:
+        """Fetch a burst of frames for an event and convert them for PIL.
+
+        ``extract_frames()`` with no StreamConfig returns the detection
+        pipeline's frame set -- snapshot, alarm and fid 1 -- which is three
+        scattered images rather than a burst, and encodes as a "GIF" of three
+        unrelated pictures. Ask for real consecutive fids instead, falling
+        back to the default set only when the event does not expose the frame
+        count and peak frame needed to compute a window.
+        """
+        import cv2 as _cv2
+        from PIL import Image as _Image
+
+        fids = _burst_frame_ids(event.frames, event.max_score_frame_id, want)
+        stream_config = (
+            StreamConfig(frame_set=[str(f) for f in fids]) if fids else None
+        )
+        extracted, _dims = self._get_event_frames(event.id, stream_config)
+
+        imgs = []
+        for _fid, img in extracted:
+            if img is None:
+                continue
+            h, w = img.shape[:2]
+            if w > width:
+                img = _cv2.resize(img, (width, int(h * width / w)))
+            imgs.append(_Image.fromarray(_cv2.cvtColor(img, _cv2.COLOR_BGR2RGB)))
+        return imgs
+
     def _event_path(self, event_id: int) -> str | None:
         """Construct the filesystem path for an event."""
         from datetime import datetime as _dt
@@ -785,3 +897,40 @@ def _parse_human_time(time_str: str) -> str | None:
     if dt:
         return dt.strftime("%Y-%m-%d %H:%M:%S")
     return time_str
+
+
+def _burst_frame_ids(total: int, centre: int | None, want: int) -> list[int] | None:
+    """A contiguous run of ``want`` frame ids centred near the peak frame.
+
+    Returns ``None`` when the event does not expose both a frame count and a
+    peak frame, meaning "no opinion" -- the caller should use the default
+    frame set.
+
+    The window is weighted slightly *before* the peak so that the run-up is
+    included: an animation that begins at the highest-scoring frame shows
+    something leaving but never arriving.
+
+    When the window overshoots the end of the event it slides back inside it
+    rather than truncating. Clamping ``end`` alone silently returns fewer
+    frames than asked for whenever the peak is near the end of the event,
+    which is a shorter animation with nothing reporting it.
+    """
+    total = int(total or 0)
+    if not total or not centre:
+        return None
+
+    want = max(1, min(want, total))
+    start = max(1, int(centre) - want // 3)
+    end = start + want - 1
+    if end > total:
+        end = total
+        start = max(1, total - want + 1)
+    return list(range(start, end + 1))
+
+
+def _unlink_quietly(path: str) -> None:
+    """Remove a file we may or may not have created. Never raises."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass

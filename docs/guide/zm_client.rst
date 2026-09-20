@@ -91,8 +91,9 @@ certificate.
 Database access
 ----------------
 
-Some operations — ``ev.tag()``, ``ev.path()``, ``ev.save_objdetect()``
-(when no ``path_override`` is given), and audio extraction for BirdNET —
+Some operations — ``ev.tag()``, ``ev.path()``, ``ev.save_objdetect()``,
+``ev.save_animation()`` (the latter two when no ``path_override`` is
+given), and audio extraction for BirdNET —
 require a direct MySQL connection to the ZM database.  By
 default, pyzm reads credentials from ``zm.conf`` (the same file
 ZoneMinder uses).  It looks for that file first at ``PYZM_CONFPATH`` (if

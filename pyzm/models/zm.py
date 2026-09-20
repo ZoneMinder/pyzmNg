@@ -173,6 +173,67 @@ class Event:
         self._require_client()
         return self._client._save_objdetect(self, image, metadata, path_override)
 
+    def save_animation(
+        self,
+        path_override: str | None = None,
+        *,
+        fname: str = "objdetect.gif",
+        frames: int = 10,
+        width: int = 640,
+        frame_ms: int = 200,
+        max_tries: int = 1,
+        retry_sleep: float = 15.0,
+    ) -> str | None:
+        """Write an animated GIF of this event to the event directory.
+
+        Companion to :meth:`save_objdetect`, which writes the still image.
+        zmNinja displays ``objdetect.gif`` when an event has one, and a
+        notification script that picks the best image for an event generally
+        prefers the animation over the still.
+
+        Parameters
+        ----------
+        path_override:
+            If given, write to this directory instead of :meth:`path`.
+        fname:
+            Output filename within that directory.
+        frames:
+            How many frames to put in the animation. They are taken as a
+            contiguous run centred near the event's highest-scoring frame, so
+            the result shows motion rather than three unrelated images.
+        width:
+            Maximum width in pixels. Wider frames are scaled down preserving
+            aspect ratio; narrower frames are left alone.
+        frame_ms:
+            Delay between frames, in milliseconds.
+        max_tries:
+            How many times to attempt the whole fetch-and-write. ZoneMinder
+            may not have finished writing an event's JPEGs when a hook runs,
+            so an immediate attempt can legitimately find no frames. Defaults
+            to 1: a library call should not sleep unless the caller asked it
+            to. It is a per-call parameter rather than a config value so that
+            a caller on a notification's critical path can spend one attempt
+            inline and hand the retry tail to a background process.
+        retry_sleep:
+            Seconds to wait between attempts.
+
+        Returns the path written, or ``None`` when no event directory was
+        available or no frame could be decoded within ``max_tries``.
+
+        Requires the ``ml`` extra (Pillow, numpy) and OpenCV.
+        """
+        self._require_client()
+        return self._client._save_animation(
+            self,
+            path_override,
+            fname=fname,
+            frames=frames,
+            width=width,
+            frame_ms=frame_ms,
+            max_tries=max_tries,
+            retry_sleep=retry_sleep,
+        )
+
     def delete(self) -> None:
         """Delete this event."""
         self._require_client()
