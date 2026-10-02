@@ -1152,6 +1152,35 @@ class TestZMClientEvents:
         assert ev._client is client
 
     @patch("pyzm.client.ZMAPI")
+    def test_events_include_just_created_event(self, mock_zmapi_cls):
+        """ZM inserts an event with Frames, AlarmFrames and MaxScore NULL
+        (zm_create.sql) and fills them in on zmc's first update. An event
+        listed in that window must not break events() or event()."""
+        just_created = _sample_event_api_data(102)
+        just_created["Event"].update(
+            {"EndTime": None, "Length": "0.00",
+             "Frames": None, "AlarmFrames": None,
+             "MaxScore": None, "MaxScoreFrameId": None}
+        )
+        mock_api = _make_mock_api()
+        mock_api.get.side_effect = [
+            {"events": [_sample_event_api_data(101), just_created]},
+            {"event": just_created},
+        ]
+        mock_zmapi_cls.return_value = mock_api
+
+        from pyzm.client import ZMClient
+        client = ZMClient(api_url="https://zm.example.com/zm/api")
+
+        events = client.events()
+        assert [e.id for e in events] == [101, 102]
+        assert events[0].frames == 270
+        ev = client.event(102)
+        assert (ev.frames, ev.alarm_frames, ev.max_score) == (0, 0, 0)
+        assert ev.max_score_frame_id is None
+        assert ev.end_time is None
+
+    @patch("pyzm.client.ZMAPI")
     def test_event_not_found_raises(self, mock_zmapi_cls):
         mock_api = _make_mock_api()
         mock_api.get.return_value = {}
