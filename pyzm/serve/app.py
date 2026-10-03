@@ -129,6 +129,13 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     # -- Optional auth -------------------------------------------------------
     auth_deps: list[Any] = []
     if config.auth_enabled:
+        # HS256 needs >= 32 bytes (RFC 7518 3.2); shorter keys, like the
+        # default, let tokens be forged and make PyJWT 2.11+ warn per token
+        if len(config.token_secret.encode()) < 32:
+            logger.warning(
+                "token_secret is shorter than 32 bytes; set a strong random "
+                "value (e.g. openssl rand -hex 32)"
+            )
         verify_token = create_token_dependency(config)
         auth_deps = [Depends(verify_token)]
     # Always register /login so clients with credentials configured don't

@@ -214,7 +214,7 @@ Or with specific models and auth:
        --processor gpu \
        --port 5000 \
        --auth --auth-user admin --auth-password secret \
-       --token-secret my-jwt-secret
+       --token-secret "$(openssl rand -hex 32)"
 
 **ZM box** -- install the client without the ``serve`` extra:
 
@@ -647,7 +647,8 @@ CLI options
      - Password (when auth enabled)
    * - ``--token-secret``
      - ``change-me``
-     - Secret key used to sign JWT tokens. **Change this in production.**
+     - Secret key used to sign JWT tokens. **Change this in production**;
+       use at least 32 bytes (e.g. ``openssl rand -hex 32``).
    * - ``--debug``
      - off
      - Enable debug logging for both pyzm and uvicorn
@@ -684,7 +685,7 @@ Example ``serve.yml``:
    auth_enabled: true
    auth_username: admin
    auth_password: "my-secret-password"
-   token_secret: "a-strong-random-secret"
+   token_secret: "<output of openssl rand -hex 32>"
    token_expiry_seconds: 3600
    workers: 3          # parallel worker processes (CPU)
    log_level: info     # debug, info, warning, error, critical
@@ -890,7 +891,9 @@ requests. The ``Detector`` gateway mode handles this automatically.
 
 The ``--token-secret`` flag controls the secret key used to sign JWT
 tokens. **Always set this to a strong random value in production.**
-The default (``change-me``) is insecure.
+The default (``change-me``) is insecure. Use at least 32 bytes, e.g.
+``openssl rand -hex 32``; with auth enabled the server logs a warning at
+startup if the secret is shorter.
 
 Manual flow:
 
