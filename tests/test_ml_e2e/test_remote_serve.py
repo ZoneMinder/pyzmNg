@@ -80,11 +80,14 @@ class TestRemoteDetection:
             loaded_before = [m["name"] for m in models if m["loaded"]]
             assert len(loaded_before) == 0, "Lazy models should not be loaded before detect"
 
+            # Name a model the installed OpenCV can load: an unnamed request
+            # takes the first object model, which may be a Darknet one that
+            # OpenCV 5 cannot load.
             with open(BIRD_IMAGE, "rb") as f:
                 r = requests.post(
                     f"http://127.0.0.1:{port}/infer",
                     files={"image": ("bird.jpg", f, "image/jpeg")},
-                    data={"type": "object"},
+                    data={"type": "object", "name": find_one_model()},
                 )
             assert r.status_code == 200
 

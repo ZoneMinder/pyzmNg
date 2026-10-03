@@ -90,11 +90,18 @@ def det(label, x1, y1, x2, y2, conf=0.9, model_name="test"):
 
 
 def find_one_model():
-    """Find the first available model in BASE_PATH."""
+    """Find the first model in BASE_PATH that the installed OpenCV can load.
+
+    OpenCV 5 removed the Darknet importer, so .weights models are skipped
+    there (pyzm reports that as a load error by design).
+    """
+    import cv2
     from pyzm.ml.detector import _discover_models
     from pyzm.models.config import Processor
     models = _discover_models(Path(BASE_PATH), Processor.CPU)
-    assert len(models) > 0, "No models found in base path"
+    if int(cv2.__version__.split(".")[0]) >= 5:
+        models = [m for m in models if not str(m.weights or "").endswith(".weights")]
+    assert len(models) > 0, "No loadable models found in base path"
     return models[0].name
 
 

@@ -6,12 +6,15 @@ build-backend = "setuptools.build_meta"
 # --strict-markers: an unregistered/typo'd marker (or skip decorator) is an
 #   error, not a silent no-op -- so a test can't accidentally never run.
 # --strict-config: typos in this section fail loudly.
-# filterwarnings=error: warnings from our own code become failures; the two
-#   ignores are resource-cleanup noise from ML libs / subprocess e2e only.
+# filterwarnings=error: warnings from our own code become failures; the
+#   ignores are resource-cleanup noise from ML libs / subprocess e2e, and
+#   one third-party deprecation that does not affect behavior.
 testpaths = ["tests"]
 addopts = "--strict-markers --strict-config"
 filterwarnings = [
     "error",
     "ignore::ResourceWarning",
     "ignore::pytest.PytestUnraisableExceptionWarning",
+    # starlette >= 1.x: TestClient prefers httpx2 but still works with httpx
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
 ]
