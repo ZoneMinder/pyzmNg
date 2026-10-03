@@ -361,6 +361,7 @@ class ModelPipeline:
                 # A gateway transport failure must bubble up so the caller can
                 # fall back to local detection (ml_fallback_local).
                 from pyzm.ml.remote import GatewayModelError, GatewayUnreachable
+                from pyzm.zm.auth import redact_secrets
                 if isinstance(exc, GatewayUnreachable):
                     raise
                 if isinstance(exc, GatewayModelError):
@@ -369,7 +370,7 @@ class ModelPipeline:
                     logger.warning(
                         "Gateway cannot run %s: %s. Load that model on the "
                         "gateway (pyzm.serve --config), or run it locally.",
-                        backend.name, exc,
+                        backend.name, redact_secrets(exc),
                     )
                     continue
                 logger.exception("Error running %s", backend.name)

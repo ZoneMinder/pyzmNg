@@ -10,6 +10,7 @@ No global state -- everything is instance-based.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 
 import requests
@@ -18,6 +19,22 @@ logger = logging.getLogger("pyzm.zm")
 
 # Minimum remaining lifetime (seconds) before we proactively refresh.
 _REFRESH_GRACE_SECONDS = 5 * 60
+
+# Credentials ZM accepts on a URL: ``token=`` (API 2.0+), ``auth=`` (legacy
+# hash) and ``user=``/``pass=`` or ``username=``/``password=`` (legacy plain).
+# Matches ``key=value`` in a query string and ``'key': 'value'`` in a dict repr.
+_SECRET_RE = re.compile(
+    r"\b(token|auth|user|username|pass|password)(=|'\s*:\s*')([^&\s'\"]+)",
+    re.IGNORECASE,
+)
+
+
+def redact_secrets(text: object) -> str:
+    """Return *text* with ZM credential values replaced by ``***``.
+
+    For log lines that print ZM or frame URLs; the rest of the URL is kept.
+    """
+    return _SECRET_RE.sub(r"\1\2***", str(text))
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:

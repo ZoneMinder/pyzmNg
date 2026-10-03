@@ -230,6 +230,28 @@ class TestInfer:
         )
         assert any("URL-mode fetch failed" in rec.getMessage() for rec in caplog.records)
 
+    def test_infer_url_mode_fetch_failure_masks_zm_auth(self, client, monkeypatch, caplog):
+        # The fetch URL carries zm_auth; neither the error sent back to the
+        # client (which logs it) nor the server log may contain the token.
+        import pyzm.serve.app as appmod
+
+        def fake_get(u, **k):
+            raise http_requests.HTTPError(f"401 Client Error: Unauthorized for url: {u}")
+        monkeypatch.setattr(appmod.http_requests, "get", fake_get)
+        with caplog.at_level(logging.DEBUG):
+            r = client.post("/infer", data={
+                "type": "object",
+                "url": "http://zm/index.php?view=image&eid=1&fid=snapshot",
+                "zm_auth": "token=TOK123",
+            })
+        error = r.json()["error"]
+        assert "TOK123" not in error
+        assert "http://zm/index.php?view=image&eid=1&fid=snapshot&token=***" in error
+        formatter = logging.Formatter()
+        logged = "\n".join(formatter.format(rec) for rec in caplog.records)
+        assert "URL-mode fetch failed" in logged
+        assert "TOK123" not in logged
+
     def test_infer_inference_error_reported(self, client, monkeypatch):
         # A backend that raises -> reported in `error`, not a 500.
         from fastapi.testclient import TestClient  # noqa: F401

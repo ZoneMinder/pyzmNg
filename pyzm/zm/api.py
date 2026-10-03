@@ -17,7 +17,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from pyzm.models.config import ZMClientConfig
-from pyzm.zm.auth import AuthManager
+from pyzm.zm.auth import AuthManager, redact_secrets
 
 logger = logging.getLogger("pyzm.zm")
 
@@ -163,7 +163,7 @@ class ZMAPI:
         url, params = self._auth.apply_auth(url, params)
 
         method = method.lower()
-        logger.debug("HTTP %s %s params=%s", method.upper(), url, params)
+        logger.debug("HTTP %s %s params=%s", method.upper(), redact_secrets(url), redact_secrets(params))
 
         try:
             resp = self._dispatch(method, url, params, payload)
@@ -263,7 +263,7 @@ class ZMAPI:
     ) -> Any:
         """Handle an HTTP error response."""
         status = exc.response.status_code if exc.response is not None else 0
-        logger.debug("HTTP error %d for %s", status, url)
+        logger.debug("HTTP error %d for %s", status, redact_secrets(url))
 
         if status == 401 and reauth:
             logger.debug("Got 401; attempting relogin and retry")

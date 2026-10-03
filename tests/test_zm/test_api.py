@@ -331,6 +331,40 @@ class TestZMAPIRequest:
                     if r.getMessage().startswith("HTTP error 500 for "))
         assert "https://zm.example.com/zm/index.php?view=image&eid=1" in line
 
+    def test_request_debug_log_masks_token(self, caplog):
+        api, session, auth = self._make_api()
+        auth.apply_auth.side_effect = lambda url, params: (url, {**(params or {}), "token": "TOK123"})
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"content-type": "application/json"}
+        mock_resp.json.return_value = {"monitors": []}
+        mock_resp.raise_for_status.return_value = None
+        session.get.return_value = mock_resp
+
+        with caplog.at_level(logging.DEBUG, logger="pyzm.zm"):
+            api.request("https://zm.example.com/zm/api/monitors.json")
+
+        line = next(r.getMessage() for r in caplog.records
+                    if r.getMessage().startswith("HTTP GET "))
+        assert "TOK123" not in line
+        assert "'token': '***'" in line
+
+    def test_http_error_debug_log_masks_legacy_credentials(self, caplog):
+        api, session, auth = self._make_api()
+        auth.apply_auth.side_effect = lambda url, params: (url + "&auth=HASH123", params or {})
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        mock_resp.raise_for_status.side_effect = requests.HTTPError(response=mock_resp)
+        session.get.return_value = mock_resp
+
+        with caplog.at_level(logging.DEBUG, logger="pyzm.zm"):
+            with pytest.raises(requests.HTTPError):
+                api.request("https://zm.example.com/zm/index.php?view=image&eid=1")
+
+        logged = "\n".join(r.getMessage() for r in caplog.records)
+        assert "HASH123" not in logged
+        assert "view=image&eid=1&auth=***" in logged
+
     def test_bad_image_zero_content_length(self):
         api, session, auth = self._make_api()
 

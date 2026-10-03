@@ -904,3 +904,20 @@ class TestGatewayCannotRunWarning:
         assert len(warnings) == 1
         assert warnings[0].startswith("Gateway cannot run YOLOv11 ONNX: fetch failed: 404")
         assert self.FRAME_URL in warnings[0]
+
+    @pytest.mark.parametrize("secret_query, secrets", [
+        ("token=TOK123", ["TOK123"]),
+        ("auth=HASH123", ["HASH123"]),
+        ("user=admin&pass=PW123", ["admin", "PW123"]),
+        ("username=admin&password=PW123", ["admin", "PW123"]),
+    ])
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_warning_masks_credentials_in_frame_url(self, mock_create, caplog, secret_query, secrets):
+        error = (f"fetch failed: 401 Client Error: Unauthorized for url: "
+                 f"{self.FRAME_URL}&{secret_query}")
+        warning = self._warnings(mock_create, error, caplog)[0]
+        for secret in secrets:
+            assert secret not in warning
+        assert self.FRAME_URL in warning
+        for key in [kv.split("=")[0] for kv in secret_query.split("&")]:
+            assert f"{key}=***" in warning
