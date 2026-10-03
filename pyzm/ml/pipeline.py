@@ -171,8 +171,8 @@ class ModelPipeline:
                 backend = self._make_backend(mc)
                 backend.load()
                 self._backends.append((mc, backend))
-            except Exception:
-                logger.exception("Error loading model %s", mc.name or mc.framework)
+            except Exception as exc:
+                logger.exception("Error loading model %s: %s", mc.name or mc.framework, exc)
         self._loaded = True
 
     def prepare(self) -> None:
@@ -191,8 +191,8 @@ class ModelPipeline:
                 backend = self._make_backend(mc)
                 # Don't call backend.load() — weights load on first detect()
                 self._backends.append((mc, backend))
-            except Exception:
-                logger.exception("Error creating backend for %s", mc.name or mc.framework)
+            except Exception as exc:
+                logger.exception("Error creating backend for %s: %s", mc.name or mc.framework, exc)
         self._loaded = True
 
     def run(

@@ -849,3 +849,26 @@ class TestLoadFailure:
         errors = self._errors(caplog)
         assert len(errors) == 1
         assert "bad_model" in errors[0].getMessage()
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_load_error_line_names_the_reason(self, mock_create, caplog):
+        """The reason is on the ERROR line itself, not only in the traceback,
+        so a one-line log view (ZM web log, grep) shows why the model failed."""
+        bad = _make_mock_backend("bad_model", [])
+        bad.load.side_effect = RuntimeError(self.REASON)
+        with caplog.at_level(logging.ERROR, logger="pyzm.ml"):
+            self._loaded_pipeline(mock_create, [bad])
+
+        message = self._errors(caplog)[0].getMessage()
+        assert "bad_model" in message and self.REASON in message
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_prepare_error_line_names_the_reason(self, mock_create, caplog):
+        from pyzm.ml.pipeline import ModelPipeline
+        mock_create.side_effect = [ValueError(self.REASON)]
+        pipeline = ModelPipeline(DetectorConfig(models=[_make_model_config("bad_model")]))
+        with caplog.at_level(logging.ERROR, logger="pyzm.ml"):
+            pipeline.prepare()
+
+        message = self._errors(caplog)[0].getMessage()
+        assert "bad_model" in message and self.REASON in message
