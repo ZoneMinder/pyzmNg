@@ -28,6 +28,7 @@ _ML_REQUIRES=[
     'onnx>=1.12.0',
     'Shapely>=1.7.0',
     'portalocker>=2.3.0',
+    'imutils',
     ]
 
 
