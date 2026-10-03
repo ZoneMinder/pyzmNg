@@ -1710,6 +1710,122 @@ class TestRemoteInference:
 
 
 # ===================================================================
+# TestMultiFrameErrorHandling -- which per-frame errors are swallowed
+# ===================================================================
+
+def _one_object_cfg(frame_strategy: str = "most") -> DetectorConfig:
+    return DetectorConfig.from_dict({
+        "general": {"model_sequence": "object", "same_model_sequence_strategy": "first",
+                    "pattern": ".*", "frame_strategy": frame_strategy},
+        "object": {"general": {"pattern": ".*"},
+                   "sequence": [{"name": "o", "object_framework": "opencv"}]},
+    })
+
+
+class TestMultiFrameErrorHandling:
+    """_detect_multi_frame logs and skips a frame whose pipeline.run fails, so
+    one bad frame does not cost the whole event."""
+
+    @patch("pyzm.ml.detector.ModelPipeline")
+    def test_failed_frame_is_logged_and_skipped(self, mock_pipeline_cls, caplog):
+        import logging
+        from pyzm.ml.detector import Detector
+
+        pipeline = MagicMock()
+        pipeline._backends = []
+        pipeline.run.side_effect = [
+            RuntimeError("bad frame"),
+            DetectionResult(detections=[_det("person")]),
+        ]
+        mock_pipeline_cls.return_value = pipeline
+
+        det = Detector(config=DetectorConfig(
+            models=[ModelConfig(name="test")], frame_strategy=FrameStrategy.MOST,
+        ))
+        with caplog.at_level(logging.ERROR, logger="pyzm.ml"):
+            result = det.detect([(1, MagicMock()), (2, MagicMock())])
+
+        assert pipeline.run.call_count == 2          # frame 2 still ran
+        assert result.frame_id == 2
+        assert result.labels == ["person"]
+        assert any("Error detecting frame 1" in r.getMessage() for r in caplog.records)
+
+    @patch("pyzm.ml.detector.ModelPipeline")
+    def test_all_frames_failing_returns_empty_result(self, mock_pipeline_cls):
+        from pyzm.ml.detector import Detector
+
+        pipeline = MagicMock()
+        pipeline._backends = []
+        pipeline.run.side_effect = RuntimeError("bad frame")
+        mock_pipeline_cls.return_value = pipeline
+
+        det = Detector(config=DetectorConfig(
+            models=[ModelConfig(name="test")], frame_strategy=FrameStrategy.MOST,
+        ))
+        result = det.detect([(1, MagicMock()), (2, MagicMock())])
+
+        assert pipeline.run.call_count == 2
+        assert result.detections == []
+        assert not result.matched
+
+    def test_local_detect_event_skips_failed_frame(self):
+        """Local-only detect_event (no gateway): a frame whose pipeline run
+        raises is skipped and the next frame's result is returned."""
+        import numpy as np
+        from pyzm.ml.detector import Detector
+        from pyzm.ml.pipeline import ModelPipeline
+
+        frames = [("1", np.zeros((10, 10, 3), np.uint8)),
+                  ("2", np.zeros((10, 10, 3), np.uint8))]
+        zm = MagicMock()
+        zm.event.return_value.extract_frames.return_value = (frames, {"original": None})
+
+        calls = []
+
+        def flaky_run(self, image, zones=None, original_shape=None):
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("bad frame")
+            return DetectionResult(detections=[_det("car")])
+
+        det = Detector(config=_one_object_cfg())
+        with patch.object(ModelPipeline, "load", lambda self: None), \
+             patch.object(ModelPipeline, "run", flaky_run):
+            result = det.detect_event(zm, 7)
+
+        assert len(calls) == 2
+        assert result.frame_id == "2"
+        assert result.labels == ["car"]
+
+    def test_image_mode_gateway_model_error_skips_model_not_event(self):
+        """Image gateway mode: a gateway that is reachable but cannot run the
+        model (GatewayModelError) is a per-model skip, never an exception."""
+        import numpy as np
+        from pyzm.ml.detector import Detector
+        from pyzm.ml.remote import GatewayClient, GatewayModelError
+
+        frames = [("1", np.zeros((10, 10, 3), np.uint8)),
+                  ("2", np.zeros((10, 10, 3), np.uint8))]
+        zm = MagicMock()
+        zm.event.return_value.extract_frames.return_value = (frames, {"original": None})
+
+        seen = []
+
+        def infer(self, image, t, n, min_confidence=None):
+            seen.append(t)
+            raise GatewayModelError("no model loaded for type=object name='o'")
+
+        det = Detector(config=_one_object_cfg(), gateway="http://gpu:5000",
+                       gateway_mode="image")
+        with patch.object(GatewayClient, "infer", infer):
+            result = det.detect_event(zm, 7)
+
+        assert seen == ["object", "object"]           # both frames hit the gateway
+        assert result.detections == []
+        assert not result.matched
+
+
+# ===================================================================
 # TestApplyFiltersZoneStrategy  (Ref: ZoneMinder/pyzmNg#68)
 # ===================================================================
 
