@@ -210,9 +210,10 @@ class Event:
             start_time=_parse_dt(ev.get("StartTime")),
             end_time=_parse_dt(ev.get("EndTime")),
             length=float(ev.get("Length", 0)),
-            frames=int(ev.get("Frames", 0)),
-            alarm_frames=int(ev.get("AlarmFrames", 0)),
-            max_score=int(ev.get("MaxScore", 0)),
+            # NULL until zmc's first update of a new event
+            frames=int(ev.get("Frames") or 0),
+            alarm_frames=int(ev.get("AlarmFrames") or 0),
+            max_score=int(ev.get("MaxScore") or 0),
             max_score_frame_id=int(ev["MaxScoreFrameId"]) if ev.get("MaxScoreFrameId") else None,
             storage_path=ev.get("StoragePath", ""),
             _raw=data,
