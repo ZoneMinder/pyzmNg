@@ -573,3 +573,44 @@ class TestNotification:
         assert n.monitors() == [1, 2]
         assert n.interval == 300
         assert n.badge_count == 4
+
+    # -- LastNotifiedAt parsing + throttle, ZM API payload shapes --------
+
+    @staticmethod
+    def _api_payload(last_notified_at, interval="60"):
+        """Shape of one entry in ZM's GET /api/notifications.json."""
+        return {"Notification": {
+            "Id": "12", "UserId": "1", "Token": "fcm-token", "Platform": "android",
+            "MonitorList": "1,2", "Interval": interval, "PushState": "enabled",
+            "AppVersion": "1.6.0", "Profile": "default", "BadgeCount": "0",
+            "LastNotifiedAt": last_notified_at,
+        }}
+
+    def test_from_api_dict_naive_mysql_datetime(self):
+        n = Notification.from_api_dict(self._api_payload("2026-10-03 12:34:56"))
+        assert n.last_notified_at == datetime(2026, 10, 3, 12, 34, 56)
+        assert n.last_notified_at.tzinfo is None
+
+    def test_from_api_dict_null_last_notified_at(self):
+        n = Notification.from_api_dict(self._api_payload(None))
+        assert n.last_notified_at is None
+        assert n.is_throttled() is False
+
+    def test_from_api_dict_iso_with_offset_is_aware(self):
+        n = Notification.from_api_dict(self._api_payload("2026-10-03T12:34:56+0200"))
+        assert n.last_notified_at.utcoffset() == timedelta(hours=2)
+        assert n.last_notified_at.hour == 12
+
+    def test_naive_api_time_throttles_against_local_now(self):
+        # ZM stores LastNotifiedAt as server-local naive time.
+        recent = (datetime.now() - timedelta(seconds=10)).strftime("%Y-%m-%d %H:%M:%S")
+        old = (datetime.now() - timedelta(seconds=120)).strftime("%Y-%m-%d %H:%M:%S")
+        assert Notification.from_api_dict(self._api_payload(recent)).is_throttled() is True
+        assert Notification.from_api_dict(self._api_payload(old)).is_throttled() is False
+
+    def test_naive_future_time_is_throttled(self):
+        # Clock skew: a LastNotifiedAt ahead of now gives negative elapsed
+        # time, which is below any interval.
+        n = Notification(id=1, interval=60,
+                         last_notified_at=datetime.now() + timedelta(seconds=300))
+        assert n.is_throttled() is True
