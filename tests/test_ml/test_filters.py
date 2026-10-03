@@ -656,6 +656,53 @@ class TestLoadSavePastDetections:
             assert load_past_detections(past_file) == ([], [])
         assert any("Error reading past detections" in r.getMessage() for r in caplog.records)
 
+    def test_save_replaces_file_atomically(self, tmp_path):
+        """Save must write a new file and rename it over the old one, so the
+        path always names a complete file. Truncating in place does not."""
+        from pyzm.ml.filters import save_past_detections
+
+        past_file = str(tmp_path / "past.pkl")
+        save_past_detections(past_file, [_det("dog", 2, 2, 4, 4)])
+        before = os.stat(past_file).st_ino
+        save_past_detections(past_file, [_det("cat", 2, 2, 4, 4)])
+        assert os.stat(past_file).st_ino != before
+
+    def test_reader_during_save_sees_old_file_and_keeps_it(self, tmp_path):
+        """A concurrent hook run reading mid-save must see the previous
+        complete file, and must not delete the file being written.
+
+        The reader is run from inside the writer, between the two pickle
+        writes, which is the window two hook processes for one monitor can
+        hit.
+        """
+        from pyzm.ml import filters
+
+        past_file = str(tmp_path / "past.pkl")
+        filters.save_past_detections(past_file, [_det("dog", 2, 2, 4, 4)])
+
+        real_dump = pickle.dump
+        seen_mid_write = []
+
+        def dump_then_read(obj, fh, *a, **k):
+            real_dump(obj, fh, *a, **k)
+            if not seen_mid_write:
+                seen_mid_write.append(filters.load_past_detections(past_file))
+
+        with patch("pickle.dump", dump_then_read):
+            filters.save_past_detections(past_file, [_det("cat", 6, 6, 9, 9)])
+
+        assert seen_mid_write == [([[2, 2, 4, 4]], ["dog"])]
+        assert filters.load_past_detections(past_file) == ([[6, 6, 9, 9]], ["cat"])
+
+    def test_failed_save_removes_temp_file(self, tmp_path):
+        from pyzm.ml.filters import save_past_detections
+
+        past_file = tmp_path / "past.pkl"
+        past_file.mkdir()                     # rename onto a directory fails
+        save_past_detections(str(past_file), [_det("dog", 2, 2, 4, 4)])
+        assert os.listdir(tmp_path) == ["past.pkl"]
+        assert past_file.is_dir()
+
     def test_corrupt_file_is_overwritten_by_next_save(self, tmp_path):
         from pyzm.ml.filters import load_past_detections, save_past_detections
 
