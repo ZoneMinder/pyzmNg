@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -774,3 +775,77 @@ class TestZoneMatchStrategyWiring:
         result = self._run(mock_create, ZoneMatchStrategy.FIRST_INTERSECTING)
         assert result.detections == []
         assert len(result.error_boxes) == 1
+
+
+# ===================================================================
+# TestLoadFailure
+# ===================================================================
+
+class TestLoadFailure:
+    """A model that fails to load is skipped with an ERROR; the rest still run."""
+
+    REASON = "Can't read ONNX file: /models/missing.onnx"
+
+    def _loaded_pipeline(self, mock_create, backends):
+        from pyzm.ml.pipeline import ModelPipeline
+        mock_create.side_effect = backends
+        pipeline = ModelPipeline(DetectorConfig(
+            models=[_make_model_config(b.name) for b in backends],
+            match_strategy=MatchStrategy.UNION,
+        ))
+        pipeline.load()
+        return pipeline
+
+    @staticmethod
+    def _errors(caplog):
+        return [r for r in caplog.records if r.levelno == logging.ERROR]
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    @patch("pyzm.ml.pipeline.filter_by_zone")
+    def test_failed_load_is_skipped_and_other_models_run(self, mock_zone_filter, mock_create, caplog):
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
+        bad = _make_mock_backend("bad_model", [_det("dog")])
+        bad.load.side_effect = RuntimeError(self.REASON)
+        good = _make_mock_backend("good_model", [_det("person")])
+
+        with caplog.at_level(logging.DEBUG, logger="pyzm.ml"):
+            pipeline = self._loaded_pipeline(mock_create, [bad, good])
+            image = MagicMock()
+            image.shape = (100, 100, 3)
+            result = pipeline.run(image)
+
+        assert [b for _, b in pipeline._backends] == [good]
+        bad.detect.assert_not_called()
+        assert [d.label for d in result.detections] == ["person"]
+        errors = self._errors(caplog)
+        assert len(errors) == 1  # once per load, not per frame
+        assert "bad_model" in errors[0].getMessage()
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_every_model_failing_to_load_gives_empty_result(self, mock_create):
+        bad = _make_mock_backend("bad_model", [_det("dog")])
+        bad.load.side_effect = RuntimeError(self.REASON)
+        pipeline = self._loaded_pipeline(mock_create, [bad])
+        image = MagicMock()
+        image.shape = (100, 100, 3)
+
+        result = pipeline.run(image)
+
+        assert pipeline._backends == []
+        assert result.detections == []
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_backend_creation_failure_in_prepare_keeps_the_others(self, mock_create, caplog):
+        good = _make_mock_backend("good_model", [_det("person")])
+        from pyzm.ml.pipeline import ModelPipeline
+        mock_create.side_effect = [ValueError(self.REASON), good]
+        pipeline = ModelPipeline(DetectorConfig(models=[
+            _make_model_config("bad_model"), _make_model_config("good_model"),
+        ]))
+        with caplog.at_level(logging.DEBUG, logger="pyzm.ml"):
+            pipeline.prepare()
+
+        assert [b for _, b in pipeline._backends] == [good]
+        errors = self._errors(caplog)
+        assert len(errors) == 1
+        assert "bad_model" in errors[0].getMessage()
