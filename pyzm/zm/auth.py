@@ -21,18 +21,20 @@ logger = logging.getLogger("pyzm.zm")
 _REFRESH_GRACE_SECONDS = 5 * 60
 
 # Credentials ZM accepts on a URL: ``token=`` (API 2.0+), ``auth=`` (legacy
-# hash) and ``user=``/``pass=`` or ``username=``/``password=`` (legacy plain).
+# hash) and ``user=``/``pass=`` or ``username=``/``password=`` (legacy plain),
+# plus API-key parameters of cloud services (OpenALPR ``secret_key=``).
 # Matches ``key=value`` in a query string and ``'key': 'value'`` in a dict repr.
 _SECRET_RE = re.compile(
-    r"\b(token|auth|user|username|pass|password)(=|'\s*:\s*')([^&\s'\"]+)",
+    r"\b(token|auth|user|username|pass|password|secret_key|key|api_key|apikey)"
+    r"(=|'\s*:\s*')([^&\s'\"]+)",
     re.IGNORECASE,
 )
 
 
 def redact_secrets(text: object) -> str:
-    """Return *text* with ZM credential values replaced by ``***``.
+    """Return *text* with credential and API-key values replaced by ``***``.
 
-    For log lines that print ZM or frame URLs; the rest of the URL is kept.
+    For log lines that print URLs; the rest of the URL is kept.
     """
     return _SECRET_RE.sub(r"\1\2***", str(text))
 

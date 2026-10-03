@@ -293,6 +293,12 @@ class TestOpenAlprLogging:
         assert "Open ALPR rejected the upload with 401 Client Error" in logged
         assert f"{self.BASE}?secret_key=" in logged
 
+    @pytest.mark.parametrize("post", ["_ok", "_unauthorized"])
+    def test_api_key_is_masked(self, tmp_path, caplog, post):
+        logged = self._detect(tmp_path, caplog, getattr(self, post))
+        assert self.KEY not in logged
+        assert f"{self.BASE}?secret_key=***&country=us" in logged
+
 
 # ===================================================================
 # Pipeline factory with merged backends

@@ -515,3 +515,18 @@ class TestAuthManagerGetAuthString:
         auth.login()
 
         assert auth.get_auth_string() == ""
+
+
+class TestRedactSecrets:
+    """redact_secrets() masks API-key parameters as well as ZM credentials."""
+
+    @pytest.mark.parametrize("key", ["secret_key", "key", "api_key", "apikey"])
+    def test_api_key_params_masked(self, key):
+        from pyzm.zm.auth import redact_secrets
+        out = redact_secrets(f"https://api.example.com/v1?{key}=K123&country=us")
+        assert out == f"https://api.example.com/v1?{key}=***&country=us"
+
+    def test_non_secret_params_kept(self):
+        from pyzm.zm.auth import redact_secrets
+        url = "http://zm/index.php?view=image&eid=1&fid=snapshot&monkey=1"
+        assert redact_secrets(url) == url
