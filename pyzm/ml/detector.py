@@ -788,6 +788,8 @@ class Detector:
     ) -> DetectionResult:
         """Run detection on multiple frames and pick the best result using
         ``frame_strategy``."""
+        from pyzm.ml.remote import GatewayUnreachable
+
         strategy = self._config.frame_strategy
         all_results: list[DetectionResult] = []
 
@@ -805,6 +807,8 @@ class Detector:
                     result = pipeline.run(image, zones=zones, original_shape=original_shape)
                     result.frame_id = frame_id
                     all_results.append(result)
+                except GatewayUnreachable:
+                    raise  # let event-level fallback (ml_fallback_local) handle it
                 except Exception:
                     logger.exception("Error detecting frame %s", frame_id)
                     continue

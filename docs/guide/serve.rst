@@ -100,6 +100,19 @@ image mode and log the reason:
 - ``stream_sequence.resize`` is set. The server fetches frames from ZM at full
   resolution and never sees the resize, so staying in URL mode would run
   inference on different pixels than a local run.
+- The monitor's width and height cannot be read from the ZM API. The client
+  needs them for size and zone filtering, so it downloads the frames instead.
+
+**Gateway unreachable.** When the client cannot reach the server (connection
+refused, timeout, or an HTTP error status), ``Detector.detect()`` and
+``Detector.detect_event()`` raise ``pyzm.ml.remote.GatewayUnreachable``. This
+holds in both modes and in every fallback above. Detection stops at the first
+such failure rather than returning an empty result, so the caller can retry
+locally. The ES hook does that when ``ml_fallback_local: "yes"`` is set. A
+server that is reachable but has no model of the requested type loaded is not
+a transport failure: that model is skipped with a warning and detection
+continues. Any other error on a single frame is logged and that frame is
+skipped.
 
 
 Deployment scenarios

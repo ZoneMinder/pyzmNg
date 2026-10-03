@@ -1824,6 +1824,61 @@ class TestMultiFrameErrorHandling:
         assert result.detections == []
         assert not result.matched
 
+    @pytest.mark.parametrize("mode, stream_kwargs, monitor_dims", [
+        ("image", {}, (10, 10)),               # image mode always downloads
+        ("url", {"resize": 800}, (10, 10)),    # URL mode declines: resize set
+        ("url", {}, None),                     # URL mode: monitor dims unknown
+    ], ids=["image-mode", "url-mode-resize", "url-mode-no-monitor-dims"])
+    def test_gateway_unreachable_on_downloaded_frames_propagates(
+        self, mode, stream_kwargs, monitor_dims,
+    ):
+        """Gateway down while running on locally downloaded frames must raise
+        GatewayUnreachable out of detect_event so the caller's event-level
+        fallback (ES ml_fallback_local) can retry locally. Swallowing it per
+        frame returned an empty result and the fallback never ran."""
+        import numpy as np
+        import requests
+        from pyzm.ml.detector import Detector
+        from pyzm.ml.remote import GatewayUnreachable
+        from pyzm.models.config import StreamConfig
+
+        frames = [("1", np.zeros((10, 10, 3), np.uint8)),
+                  ("2", np.zeros((10, 10, 3), np.uint8))]
+        zm = MagicMock()
+        zm.api.portal_url = "http://zm"
+        ev = zm.event.return_value
+        ev.monitor_id = 5
+        ev.extract_frames.return_value = (frames, {"original": None})
+        if monitor_dims:
+            zm.monitor.return_value.height, zm.monitor.return_value.width = monitor_dims
+        else:
+            zm.monitor.side_effect = RuntimeError("monitor lookup failed")
+
+        det = Detector(config=_one_object_cfg(), gateway="http://gpu:5000",
+                       gateway_mode=mode)
+        with patch("requests.post", side_effect=requests.ConnectionError("refused")) as post:
+            with pytest.raises(GatewayUnreachable):
+                det.detect_event(zm, 7, stream_config=StreamConfig(**stream_kwargs))
+
+        ev.extract_frames.assert_called_once()        # frames were downloaded
+        assert post.call_count == 1                   # gave up on first frame
+
+    def test_gateway_unreachable_propagates_from_detect_frame_list(self):
+        """detect() on a frame list goes through the same multi-frame loop and
+        must surface gateway failure like detect() on a single image does."""
+        import numpy as np
+        import requests
+        from pyzm.ml.detector import Detector
+        from pyzm.ml.remote import GatewayUnreachable
+
+        frames = [("1", np.zeros((10, 10, 3), np.uint8)),
+                  ("2", np.zeros((10, 10, 3), np.uint8))]
+        det = Detector(config=_one_object_cfg(), gateway="http://gpu:5000",
+                       gateway_mode="image")
+        with patch("requests.post", side_effect=requests.ConnectionError("refused")):
+            with pytest.raises(GatewayUnreachable):
+                det.detect(frames)
+
 
 # ===================================================================
 # TestApplyFiltersZoneStrategy  (Ref: ZoneMinder/pyzmNg#68)
