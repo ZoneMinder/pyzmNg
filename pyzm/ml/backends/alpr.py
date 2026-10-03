@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from pyzm.ml.backends.base import MLBackend
 from pyzm.models.config import ModelConfig
 from pyzm.models.detection import BBox, Detection
+from pyzm.zm.auth import redact_secrets
 
 if TYPE_CHECKING:
     import numpy as np
@@ -252,17 +253,19 @@ class _OpenAlpr(_AlprService):
                     params += "&recognize_vehicle=" + str(opts["openalpr_recognize_vehicle"])
 
                 rurl = f"{self.url}?secret_key={self.apikey}{params}"
-                logger.debug("Trying OpenALPR with url: %s", rurl)
+                logger.debug("Trying OpenALPR with url: %s", redact_secrets(rurl))
                 response = requests.post(rurl, files={"image": fp})
                 response.raise_for_status()
                 response = response.json()
                 logger.debug("OpenALPR JSON: %s", response)
         except Exception as e:
+            # The requests error names the URL, which carries secret_key.
+            err = redact_secrets(e)
             response = {
-                "error": f"Open ALPR rejected the upload with {e}",
+                "error": f"Open ALPR rejected the upload with {err}",
                 "results": [],
             }
-            logger.debug("Open ALPR rejected the upload with %s", e)
+            logger.debug("Open ALPR rejected the upload with %s", err)
         finally:
             self._cleanup()
 

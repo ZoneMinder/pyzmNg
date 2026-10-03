@@ -11,6 +11,7 @@ Refs #23
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch, mock_open
 
 import pytest
@@ -249,6 +250,54 @@ class TestAlprBugFixes:
         service = _PlateRecognizer(config)
         assert service._config.platerec_min_dscore == 0.5
         assert service._config.platerec_min_score == 0.7
+
+
+class TestOpenAlprLogging:
+    """What the OpenALPR backend logs about its request URL."""
+
+    KEY = "sk_LIVE123"
+    BASE = "https://api.openalpr.com/v2/recognize"
+
+    def _detect(self, tmp_path, caplog, post):
+        from pyzm.ml.backends.alpr import _OpenAlpr
+        img = tmp_path / "plate.jpg"
+        img.write_bytes(b"jpeg")
+        service = _OpenAlpr(ModelConfig(
+            alpr_service="open_alpr", alpr_key=self.KEY,
+            options={"openalpr_country": "us"},
+        ))
+        with patch("requests.post", side_effect=post), \
+                caplog.at_level(logging.DEBUG, logger="pyzm.ml"):
+            dets = service.detect(str(img), "alpr")
+        assert dets == []
+        return "\n".join(r.getMessage() for r in caplog.records)
+
+    @staticmethod
+    def _ok(url, **kw):
+        resp = MagicMock()
+        resp.json.return_value = {"results": []}
+        return resp
+
+    @staticmethod
+    def _unauthorized(url, **kw):
+        import requests
+        raise requests.HTTPError(f"401 Client Error: Unauthorized for url: {url}")
+
+    def test_request_url_is_logged(self, tmp_path, caplog):
+        logged = self._detect(tmp_path, caplog, self._ok)
+        assert f"Trying OpenALPR with url: {self.BASE}?secret_key=" in logged
+        assert "&country=us" in logged
+
+    def test_rejected_upload_is_logged_with_url(self, tmp_path, caplog):
+        logged = self._detect(tmp_path, caplog, self._unauthorized)
+        assert "Open ALPR rejected the upload with 401 Client Error" in logged
+        assert f"{self.BASE}?secret_key=" in logged
+
+    @pytest.mark.parametrize("post", ["_ok", "_unauthorized"])
+    def test_api_key_is_masked(self, tmp_path, caplog, post):
+        logged = self._detect(tmp_path, caplog, getattr(self, post))
+        assert self.KEY not in logged
+        assert f"{self.BASE}?secret_key=***&country=us" in logged
 
 
 # ===================================================================

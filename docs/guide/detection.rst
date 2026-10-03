@@ -968,10 +968,19 @@ per-type: detections are grouped by their ``detection_type`` and each
 group uses its own resolved config.  Past data is loaded once, and all
 detections are saved once after filtering.
 
-The pickle file is stored at ``<image_path>/past_detections.pkl``.
+The pickle file is stored at ``<image_path>/past_detections_mid<monitor_id>.pkl``
+when ``monitor_id`` is set (the ES hook sets it), and at
+``<image_path>/past_detections.pkl`` otherwise.
 ``image_path`` defaults to ``"/tmp"``
 and can be set in ``DetectorConfig`` or via ``objectconfig.yml``
 (which typically sets it to ``"/var/lib/zmeventnotification/images"``).
+
+The file holds only the detections of the most recent run; each save replaces
+it. The save writes a temporary file next to it and renames it into place, so
+two runs for the same monitor at the same time never see a half-written file.
+When they overlap, both compare against the file that existed before either
+saved, and the later save wins. An empty or unreadable file is treated as "no
+past detections" and is replaced by the next save.
 
 
 Result objects
