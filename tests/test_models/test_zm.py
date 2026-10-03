@@ -614,3 +614,35 @@ class TestNotification:
         n = Notification(id=1, interval=60,
                          last_notified_at=datetime.now() + timedelta(seconds=300))
         assert n.is_throttled() is True
+
+    # -- timezone-aware LastNotifiedAt -----------------------------------
+
+    def test_aware_time_within_interval_is_throttled(self):
+        from datetime import timezone
+        tz = timezone(timedelta(hours=-5))
+        n = Notification(id=1, interval=1000,
+                         last_notified_at=datetime.now(tz) - timedelta(seconds=100))
+        assert n.is_throttled() is True
+
+    def test_aware_time_after_interval_is_not_throttled(self):
+        from datetime import timezone
+        tz = timezone(timedelta(hours=9, minutes=30))
+        n = Notification(id=1, interval=10,
+                         last_notified_at=datetime.now(tz) - timedelta(seconds=100))
+        assert n.is_throttled() is False
+
+    def test_aware_future_time_is_throttled(self):
+        from datetime import timezone
+        n = Notification(id=1, interval=60,
+                         last_notified_at=datetime.now(timezone.utc) + timedelta(seconds=300))
+        assert n.is_throttled() is True
+
+    def test_iso_api_time_throttle_uses_its_offset(self):
+        # Same instant written in a far-off offset: elapsed must be measured
+        # between instants, not wall-clock digits.
+        from datetime import timezone
+        tz = timezone(timedelta(hours=13))
+        recent = (datetime.now(tz) - timedelta(seconds=10)).strftime("%Y-%m-%dT%H:%M:%S%z")
+        old = (datetime.now(tz) - timedelta(seconds=120)).strftime("%Y-%m-%dT%H:%M:%S%z")
+        assert Notification.from_api_dict(self._api_payload(recent)).is_throttled() is True
+        assert Notification.from_api_dict(self._api_payload(old)).is_throttled() is False

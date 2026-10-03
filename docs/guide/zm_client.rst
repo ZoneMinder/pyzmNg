@@ -226,13 +226,15 @@ Notification fields
      - Current badge count
    * - ``last_notified_at``
      - ``datetime | None``
-     - When the last push was sent to this token
+     - When the last push was sent to this token. Naive for ZM's
+       ``YYYY-MM-DD HH:MM:SS`` (server local time); timezone-aware when the API
+       returns an ISO 8601 value with an offset
 
 Helper methods
 ~~~~~~~~~~~~~~~
 
-- ``monitors()`` — returns the monitor list as a ``list[int]``, or empty list if all monitors
+- ``monitors()`` — returns the monitor list as a ``list[int]``, or ``None`` if all monitors
 - ``should_notify(monitor_id)`` — ``True`` if this token should receive notifications for the given monitor (checks ``push_state``, ``monitor_list``)
-- ``is_throttled()`` — ``True`` if ``interval`` seconds have not elapsed since ``last_notified_at``
+- ``is_throttled()`` — ``True`` if ``interval`` seconds have not elapsed since ``last_notified_at``. A naive value is compared with local now, an aware one with now in its own timezone
 - ``update_last_sent(badge)`` — updates ``LastNotifiedAt`` to now and sets ``BadgeCount``
 - ``delete()`` — deletes this notification record from ZM
