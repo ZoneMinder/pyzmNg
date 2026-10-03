@@ -872,3 +872,35 @@ class TestLoadFailure:
 
         message = self._errors(caplog)[0].getMessage()
         assert "bad_model" in message and self.REASON in message
+
+
+# ===================================================================
+# TestGatewayCannotRunWarning
+# ===================================================================
+
+class TestGatewayCannotRunWarning:
+    """GatewayModelError -> one WARNING naming the model and the gateway's error."""
+
+    FRAME_URL = "http://zm.local/zm/index.php?view=image&eid=5&fid=snapshot"
+
+    def _warnings(self, mock_create, error, caplog):
+        from pyzm.ml.pipeline import ModelPipeline
+        from pyzm.ml.remote import GatewayModelError
+        backend = _make_mock_backend("YOLOv11 ONNX", [])
+        backend.detect.side_effect = GatewayModelError(error)
+        mock_create.return_value = backend
+        pipeline = ModelPipeline(DetectorConfig(models=[_make_model_config("YOLOv11 ONNX")]))
+        image = MagicMock()
+        image.shape = (100, 100, 3)
+        with caplog.at_level(logging.DEBUG, logger="pyzm.ml"):
+            result = pipeline.run(image)
+        assert result.detections == []
+        return [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_warning_names_model_and_frame_url(self, mock_create, caplog):
+        error = f"fetch failed: 404 Client Error: Not Found for url: {self.FRAME_URL}"
+        warnings = self._warnings(mock_create, error, caplog)
+        assert len(warnings) == 1
+        assert warnings[0].startswith("Gateway cannot run YOLOv11 ONNX: fetch failed: 404")
+        assert self.FRAME_URL in warnings[0]

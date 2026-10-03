@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import requests as http_requests
 
 from pyzm.models.config import ServerConfig
 from pyzm.models.detection import BBox, Detection, DetectionResult
@@ -205,6 +207,28 @@ class TestInfer:
         assert r.status_code == 200
         assert r.json()["detections"][0]["label"] == "person"
         assert "token=x" in seen["url"]        # zm_auth appended to the fetch
+
+    def test_infer_url_mode_fetch_failure_reported(self, client, monkeypatch, caplog):
+        # A failed ZM fetch -> reported in `error` with the frame URL, logged at
+        # ERROR, never a 500.
+        import pyzm.serve.app as appmod
+
+        def fake_get(u, **k):
+            raise http_requests.HTTPError(f"404 Client Error: Not Found for url: {u}")
+        monkeypatch.setattr(appmod.http_requests, "get", fake_get)
+        with caplog.at_level(logging.ERROR, logger="pyzm.serve"):
+            r = client.post("/infer", data={
+                "type": "object",
+                "url": "http://zm/index.php?view=image&eid=1&fid=snapshot",
+            })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["detections"] == []
+        assert data["error"] == (
+            "fetch failed: 404 Client Error: Not Found for url: "
+            "http://zm/index.php?view=image&eid=1&fid=snapshot"
+        )
+        assert any("URL-mode fetch failed" in rec.getMessage() for rec in caplog.records)
 
     def test_infer_inference_error_reported(self, client, monkeypatch):
         # A backend that raises -> reported in `error`, not a 500.
