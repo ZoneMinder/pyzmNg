@@ -20,6 +20,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from pyzm.ml.detector import Detector
 from pyzm.models.config import ModelConfig, ServerConfig
 from pyzm.serve.auth import create_login_route, create_token_dependency
+from pyzm.zm.auth import redact_secrets
 
 logger = logging.getLogger("pyzm.serve")
 
@@ -128,6 +129,13 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
     # -- Optional auth -------------------------------------------------------
     auth_deps: list[Any] = []
     if config.auth_enabled:
+        # HS256 needs >= 32 bytes (RFC 7518 3.2); shorter keys, like the
+        # default, let tokens be forged and make PyJWT 2.11+ warn per token
+        if len(config.token_secret.encode()) < 32:
+            logger.warning(
+                "token_secret is shorter than 32 bytes; set a strong random "
+                "value (e.g. openssl rand -hex 32)"
+            )
         verify_token = create_token_dependency(config)
         auth_deps = [Depends(verify_token)]
     # Always register /login so clients with credentials configured don't
@@ -231,8 +239,10 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             try:
                 frame = _fetch_frame(url, zm_auth, verify_ssl not in ("0", "false", "False", ""))
             except Exception as exc:
-                logger.exception("URL-mode fetch failed: %s", url)
-                return {"detections": [], "error": f"fetch failed: {exc}"}
+                # No traceback: the exception text carries the URL with zm_auth.
+                error = f"fetch failed: {redact_secrets(exc)}"
+                logger.error("URL-mode fetch failed: %s (%s)", redact_secrets(url), error)
+                return {"detections": [], "error": error}
         else:
             contents = await image.read() if image is not None else b""
             if not contents:

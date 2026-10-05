@@ -3,6 +3,35 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.5.4] - 2026-10-03
+
+### Bug Fixes
+
+- declare imutils in the ml extra ([707d40a](https://github.com/ZoneMinder/pyzmNg/commit/707d40ae29d7d1b1dabd5db2994687dd31382af0))
+- warn on short token_secret; test secrets work with PyJWT 2.11+ ([3c83bf5](https://github.com/ZoneMinder/pyzmNg/commit/3c83bf57818558397a703cc2f39aabdeadb43c93))
+- parse events whose Frames/AlarmFrames/MaxScore are NULL ([aa7896f](https://github.com/ZoneMinder/pyzmNg/commit/aa7896f2401af4611a2dd6f04b945c82019d3d12))
+- mask the OpenALPR secret_key in log lines ([afcb373](https://github.com/ZoneMinder/pyzmNg/commit/afcb3736be617f380ac4ae0c7c306510d453e5c5))
+- mask ZM credentials in log lines that print URLs ([ab1464b](https://github.com/ZoneMinder/pyzmNg/commit/ab1464b9b74026c1bc59e7e9c78a4291ef806e9d))
+- put the reason on the model load ERROR line ([c391eb1](https://github.com/ZoneMinder/pyzmNg/commit/c391eb1d2e51c66f8c804175bd2e4058b9aa323a))
+- is_throttled handles timezone-aware LastNotifiedAt ([657321d](https://github.com/ZoneMinder/pyzmNg/commit/657321d6c01b5a256d3ae7e79df98d098230562a))
+- write past-detection file atomically ([46dd7e0](https://github.com/ZoneMinder/pyzmNg/commit/46dd7e08d097abe07b1e075b2909f0e669a0a735))
+- let GatewayUnreachable escape multi-frame detection ([69ea978](https://github.com/ZoneMinder/pyzmNg/commit/69ea978cb0c7a92cd5083920ed2e7f721195c2ba))
+
+### Miscellaneous
+
+- bump version to v2.5.4 ([d504b80](https://github.com/ZoneMinder/pyzmNg/commit/d504b8020daac937ea1207d88333c3ebf063489c))
+
+### Testing
+
+- pass with current dependency releases (starlette 1.x, OpenCV 5) ([bea5ccd](https://github.com/ZoneMinder/pyzmNg/commit/bea5ccd4864cc45f0e6bf74937d57004189d0bd5))
+- keep any_event out of test_delete_event ([a033683](https://github.com/ZoneMinder/pyzmNg/commit/a033683a85cde1d7a4b979c26c2dd90a2c96cd9d))
+- pin what the OpenALPR backend logs about its request URL ([1068245](https://github.com/ZoneMinder/pyzmNg/commit/106824558202a45a8ba2dc3c611ed9cac3249cf2))
+- pin log lines that carry ZM and frame URLs ([ba21581](https://github.com/ZoneMinder/pyzmNg/commit/ba2158160d70e95628968e3e4fbccedb2e84ee33))
+- pin model load failure handling in the pipeline ([3eac5a2](https://github.com/ZoneMinder/pyzmNg/commit/3eac5a283e433a32c160297e78cfcdba1c51c569))
+- pin Notification LastNotifiedAt parsing and naive throttle ([b50dbcc](https://github.com/ZoneMinder/pyzmNg/commit/b50dbcc4f524a4ac5bd31b49e28aba55543437b6))
+- pin past-detection file format, modes and error handling ([491367c](https://github.com/ZoneMinder/pyzmNg/commit/491367c967779c91cc4eade6b7222e08ab6182c3))
+- pin per-frame error handling in multi-frame detection ([54e6837](https://github.com/ZoneMinder/pyzmNg/commit/54e68373e2e967d5cbc4d17bab8c63716fcb3c7b))
+
 ## [2.5.3] - 2026-09-18
 
 ### Bug Fixes
@@ -12,6 +41,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- update CHANGELOG for v2.5.3 ([cb3c95f](https://github.com/ZoneMinder/pyzmNg/commit/cb3c95f811256708e2384c529f74d6fe7b099169))
 - recommend ONNX models over Darknet for OpenCV headroom ([38d4463](https://github.com/ZoneMinder/pyzmNg/commit/38d4463e75d9c7f0219e13a72d4acf30aeb0b7e4))
 
 ### Miscellaneous

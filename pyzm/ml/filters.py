@@ -295,7 +295,8 @@ def filter_by_pattern(
 def load_past_detections(past_file: str) -> tuple[list[list[int]], list[str]]:
     """Load ``(saved_boxes, saved_labels)`` from a pickle file.
 
-    Returns ``([], [])`` on missing file, empty file, or read error.
+    Returns ``([], [])`` on missing file, empty file, or read error. A bad
+    file is left in place; the next :func:`save_past_detections` replaces it.
     """
     import pickle  # lazy import
 
@@ -307,29 +308,50 @@ def load_past_detections(past_file: str) -> tuple[list[list[int]], list[str]]:
     except FileNotFoundError:
         logger.debug("No past-detection file found at %s", past_file)
     except EOFError:
-        logger.debug("Empty past-detection file at %s, removing", past_file)
-        try:
-            os.remove(past_file)
-        except OSError:
-            pass
+        logger.debug("Empty or truncated past-detection file at %s", past_file)
     except Exception:
         logger.exception("Error reading past detections from %s", past_file)
     return [], []
 
 
 def save_past_detections(past_file: str, detections: list[Detection]) -> None:
-    """Save current detections to a pickle file for future comparisons."""
+    """Save current detections to a pickle file for future comparisons.
+
+    Writes a temp file in the same directory and renames it over
+    *past_file*, so a concurrent reader sees either the old or the new file,
+    never a partial one. An existing file's mode (and, where permitted, its
+    owner) carries over; a new file gets the default mode for the umask.
+    """
     import pickle  # lazy import
+    import uuid  # lazy import
 
     if not detections:
         return
+    tmp = f"{past_file}.{uuid.uuid4().hex}.tmp"
     try:
-        with open(past_file, "wb") as fh:
+        # O_EXCL on a unique name; 0o666 so the umask applies as with open().
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+        with os.fdopen(fd, "wb") as fh:
             pickle.dump([d.bbox.as_list() for d in detections], fh)
             pickle.dump([d.label for d in detections], fh)
+        try:
+            st = os.stat(past_file)
+        except FileNotFoundError:
+            pass
+        else:
+            os.chmod(tmp, st.st_mode & 0o7777)
+            try:
+                os.chown(tmp, st.st_uid, st.st_gid)
+            except OSError:
+                pass  # not root: the file stays owned by this user
+        os.replace(tmp, past_file)
         logger.debug("Saved %d detections to %s", len(detections), past_file)
     except Exception:
         logger.exception("Error saving past detections to %s", past_file)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def match_past_detections(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -774,3 +775,149 @@ class TestZoneMatchStrategyWiring:
         result = self._run(mock_create, ZoneMatchStrategy.FIRST_INTERSECTING)
         assert result.detections == []
         assert len(result.error_boxes) == 1
+
+
+# ===================================================================
+# TestLoadFailure
+# ===================================================================
+
+class TestLoadFailure:
+    """A model that fails to load is skipped with an ERROR; the rest still run."""
+
+    REASON = "Can't read ONNX file: /models/missing.onnx"
+
+    def _loaded_pipeline(self, mock_create, backends):
+        from pyzm.ml.pipeline import ModelPipeline
+        mock_create.side_effect = backends
+        pipeline = ModelPipeline(DetectorConfig(
+            models=[_make_model_config(b.name) for b in backends],
+            match_strategy=MatchStrategy.UNION,
+        ))
+        pipeline.load()
+        return pipeline
+
+    @staticmethod
+    def _errors(caplog):
+        return [r for r in caplog.records if r.levelno == logging.ERROR]
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    @patch("pyzm.ml.pipeline.filter_by_zone")
+    def test_failed_load_is_skipped_and_other_models_run(self, mock_zone_filter, mock_create, caplog):
+        mock_zone_filter.side_effect = lambda dets, zones, shape, strategy=None: (dets, [])
+        bad = _make_mock_backend("bad_model", [_det("dog")])
+        bad.load.side_effect = RuntimeError(self.REASON)
+        good = _make_mock_backend("good_model", [_det("person")])
+
+        with caplog.at_level(logging.DEBUG, logger="pyzm.ml"):
+            pipeline = self._loaded_pipeline(mock_create, [bad, good])
+            image = MagicMock()
+            image.shape = (100, 100, 3)
+            result = pipeline.run(image)
+
+        assert [b for _, b in pipeline._backends] == [good]
+        bad.detect.assert_not_called()
+        assert [d.label for d in result.detections] == ["person"]
+        errors = self._errors(caplog)
+        assert len(errors) == 1  # once per load, not per frame
+        assert "bad_model" in errors[0].getMessage()
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_every_model_failing_to_load_gives_empty_result(self, mock_create):
+        bad = _make_mock_backend("bad_model", [_det("dog")])
+        bad.load.side_effect = RuntimeError(self.REASON)
+        pipeline = self._loaded_pipeline(mock_create, [bad])
+        image = MagicMock()
+        image.shape = (100, 100, 3)
+
+        result = pipeline.run(image)
+
+        assert pipeline._backends == []
+        assert result.detections == []
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_backend_creation_failure_in_prepare_keeps_the_others(self, mock_create, caplog):
+        good = _make_mock_backend("good_model", [_det("person")])
+        from pyzm.ml.pipeline import ModelPipeline
+        mock_create.side_effect = [ValueError(self.REASON), good]
+        pipeline = ModelPipeline(DetectorConfig(models=[
+            _make_model_config("bad_model"), _make_model_config("good_model"),
+        ]))
+        with caplog.at_level(logging.DEBUG, logger="pyzm.ml"):
+            pipeline.prepare()
+
+        assert [b for _, b in pipeline._backends] == [good]
+        errors = self._errors(caplog)
+        assert len(errors) == 1
+        assert "bad_model" in errors[0].getMessage()
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_load_error_line_names_the_reason(self, mock_create, caplog):
+        """The reason is on the ERROR line itself, not only in the traceback,
+        so a one-line log view (ZM web log, grep) shows why the model failed."""
+        bad = _make_mock_backend("bad_model", [])
+        bad.load.side_effect = RuntimeError(self.REASON)
+        with caplog.at_level(logging.ERROR, logger="pyzm.ml"):
+            self._loaded_pipeline(mock_create, [bad])
+
+        message = self._errors(caplog)[0].getMessage()
+        assert "bad_model" in message and self.REASON in message
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_prepare_error_line_names_the_reason(self, mock_create, caplog):
+        from pyzm.ml.pipeline import ModelPipeline
+        mock_create.side_effect = [ValueError(self.REASON)]
+        pipeline = ModelPipeline(DetectorConfig(models=[_make_model_config("bad_model")]))
+        with caplog.at_level(logging.ERROR, logger="pyzm.ml"):
+            pipeline.prepare()
+
+        message = self._errors(caplog)[0].getMessage()
+        assert "bad_model" in message and self.REASON in message
+
+
+# ===================================================================
+# TestGatewayCannotRunWarning
+# ===================================================================
+
+class TestGatewayCannotRunWarning:
+    """GatewayModelError -> one WARNING naming the model and the gateway's error."""
+
+    FRAME_URL = "http://zm.local/zm/index.php?view=image&eid=5&fid=snapshot"
+
+    def _warnings(self, mock_create, error, caplog):
+        from pyzm.ml.pipeline import ModelPipeline
+        from pyzm.ml.remote import GatewayModelError
+        backend = _make_mock_backend("YOLOv11 ONNX", [])
+        backend.detect.side_effect = GatewayModelError(error)
+        mock_create.return_value = backend
+        pipeline = ModelPipeline(DetectorConfig(models=[_make_model_config("YOLOv11 ONNX")]))
+        image = MagicMock()
+        image.shape = (100, 100, 3)
+        with caplog.at_level(logging.DEBUG, logger="pyzm.ml"):
+            result = pipeline.run(image)
+        assert result.detections == []
+        return [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_warning_names_model_and_frame_url(self, mock_create, caplog):
+        error = f"fetch failed: 404 Client Error: Not Found for url: {self.FRAME_URL}"
+        warnings = self._warnings(mock_create, error, caplog)
+        assert len(warnings) == 1
+        assert warnings[0].startswith("Gateway cannot run YOLOv11 ONNX: fetch failed: 404")
+        assert self.FRAME_URL in warnings[0]
+
+    @pytest.mark.parametrize("secret_query, secrets", [
+        ("token=TOK123", ["TOK123"]),
+        ("auth=HASH123", ["HASH123"]),
+        ("user=admin&pass=PW123", ["admin", "PW123"]),
+        ("username=admin&password=PW123", ["admin", "PW123"]),
+    ])
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_warning_masks_credentials_in_frame_url(self, mock_create, caplog, secret_query, secrets):
+        error = (f"fetch failed: 401 Client Error: Unauthorized for url: "
+                 f"{self.FRAME_URL}&{secret_query}")
+        warning = self._warnings(mock_create, error, caplog)[0]
+        for secret in secrets:
+            assert secret not in warning
+        assert self.FRAME_URL in warning
+        for key in [kv.split("=")[0] for kv in secret_query.split("&")]:
+            assert f"{key}=***" in warning

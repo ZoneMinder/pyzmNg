@@ -100,6 +100,19 @@ image mode and log the reason:
 - ``stream_sequence.resize`` is set. The server fetches frames from ZM at full
   resolution and never sees the resize, so staying in URL mode would run
   inference on different pixels than a local run.
+- The monitor's width and height cannot be read from the ZM API. The client
+  needs them for size and zone filtering, so it downloads the frames instead.
+
+**Gateway unreachable.** When the client cannot reach the server (connection
+refused, timeout, or an HTTP error status), ``Detector.detect()`` and
+``Detector.detect_event()`` raise ``pyzm.ml.remote.GatewayUnreachable``. This
+holds in both modes and in every fallback above. Detection stops at the first
+such failure rather than returning an empty result, so the caller can retry
+locally. The ES hook does that when ``ml_fallback_local: "yes"`` is set. A
+server that is reachable but has no model of the requested type loaded is not
+a transport failure: that model is skipped with a warning and detection
+continues. Any other error on a single frame is logged and that frame is
+skipped.
 
 
 Deployment scenarios
@@ -201,7 +214,7 @@ Or with specific models and auth:
        --processor gpu \
        --port 5000 \
        --auth --auth-user admin --auth-password secret \
-       --token-secret my-jwt-secret
+       --token-secret "$(openssl rand -hex 32)"
 
 **ZM box** -- install the client without the ``serve`` extra:
 
@@ -634,7 +647,8 @@ CLI options
      - Password (when auth enabled)
    * - ``--token-secret``
      - ``change-me``
-     - Secret key used to sign JWT tokens. **Change this in production.**
+     - Secret key used to sign JWT tokens. **Change this in production**;
+       use at least 32 bytes (e.g. ``openssl rand -hex 32``).
    * - ``--debug``
      - off
      - Enable debug logging for both pyzm and uvicorn
@@ -671,7 +685,7 @@ Example ``serve.yml``:
    auth_enabled: true
    auth_username: admin
    auth_password: "my-secret-password"
-   token_secret: "a-strong-random-secret"
+   token_secret: "<output of openssl rand -hex 32>"
    token_expiry_seconds: 3600
    workers: 3          # parallel worker processes (CPU)
    log_level: info     # debug, info, warning, error, critical
@@ -877,7 +891,9 @@ requests. The ``Detector`` gateway mode handles this automatically.
 
 The ``--token-secret`` flag controls the secret key used to sign JWT
 tokens. **Always set this to a strong random value in production.**
-The default (``change-me``) is insecure.
+The default (``change-me``) is insecure. Use at least 32 bytes, e.g.
+``openssl rand -hex 32``; with auth enabled the server logs a warning at
+startup if the secret is shorter.
 
 Manual flow:
 

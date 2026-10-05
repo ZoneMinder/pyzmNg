@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import logging
+
 import pytest
 
 from pyzm.models.config import ServerConfig
@@ -34,7 +36,9 @@ def auth_client():
         auth_enabled=True,
         auth_username="admin",
         auth_password="secret123",
-        token_secret="test-secret",
+        # >= 32 bytes: PyJWT 2.11+ warns on shorter HS256 keys (pytest makes
+        # warnings errors)
+        token_secret="test-secret-0123456789abcdef0123456789",
         token_expiry_seconds=3600,
     )
     with patch("pyzm.serve.app.Detector") as MockDetector:
@@ -118,7 +122,8 @@ class TestAuthProtectedEndpoints:
 @pytest.fixture
 def noauth_client():
     """Server with auth_enabled=False."""
-    config = ServerConfig(models=["yolov4"], auth_enabled=False)
+    config = ServerConfig(models=["yolov4"], auth_enabled=False,
+                          token_secret="test-secret-0123456789abcdef0123456789")
 
     with patch("pyzm.serve.app.Detector") as MockDetector:
         mock_det = _mock_detector()
@@ -169,3 +174,31 @@ class TestNoAuthLogin:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 200
+
+
+class TestTokenSecretWarning:
+    """create_app warns when auth is on and the HS256 secret is short."""
+
+    def _app(self, **kw):
+        with patch("pyzm.serve.app.Detector") as MockDetector:
+            MockDetector.return_value = _mock_detector()
+            from pyzm.serve.app import create_app
+            return create_app(ServerConfig(models=["yolov4"], **kw))
+
+    @pytest.mark.parametrize("secret", ["change-me", "x" * 31])
+    def test_short_secret_with_auth_warns(self, caplog, secret):
+        with caplog.at_level(logging.WARNING, logger="pyzm.serve"):
+            self._app(auth_enabled=True, auth_username="a", auth_password="b", token_secret=secret)
+        msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("token_secret" in m for m in msgs)
+        assert all(secret not in m for m in msgs)
+
+    def test_long_secret_with_auth_quiet(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="pyzm.serve"):
+            self._app(auth_enabled=True, auth_username="a", auth_password="b", token_secret="y" * 32)
+        assert not [r for r in caplog.records if "token_secret" in r.getMessage()]
+
+    def test_auth_disabled_quiet(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="pyzm.serve"):
+            self._app(auth_enabled=False)
+        assert not [r for r in caplog.records if "token_secret" in r.getMessage()]
