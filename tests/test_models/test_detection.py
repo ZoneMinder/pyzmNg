@@ -148,6 +148,16 @@ class TestDetectionResult:
             ),
         ]
 
+    def _annotate_with_mock_cv2(self, image, detection, text_size):
+        mock_cv2 = MagicMock()
+        mock_cv2.FONT_HERSHEY_SIMPLEX = 0
+        mock_cv2.getTextSize.return_value = (text_size, 0)
+
+        with patch.dict("sys.modules", {"cv2": mock_cv2}):
+            result = DetectionResult(detections=[detection], image=image).annotate()
+
+        return mock_cv2, result
+
     def test_matched_true(self):
         dr = DetectionResult(detections=self._make_detections())
         assert dr.matched is True
@@ -225,6 +235,52 @@ class TestDetectionResult:
         dr = DetectionResult(detections=self._make_detections())
         with pytest.raises(ValueError, match="No image"):
             dr.annotate()
+
+    @pytest.mark.integration
+    def test_annotate_label_stays_inside_top_edge(self, sample_image):
+        image = sample_image[:24, :24]
+        detection = Detection("person", 0.9, BBox(5, 0, 18, 12))
+
+        mock_cv2, _ = self._annotate_with_mock_cv2(image, detection, (12, 8))
+
+        background = mock_cv2.rectangle.call_args_list[1].args
+        text = mock_cv2.putText.call_args.args
+        assert background[1][1] == 0
+        assert 0 <= text[2][1] < image.shape[0]
+
+    @pytest.mark.integration
+    def test_annotate_label_stays_above_box_when_it_fits(self, sample_image):
+        image = sample_image[:32, :24]
+        detection = Detection("person", 0.9, BBox(5, 22, 18, 30))
+
+        mock_cv2, _ = self._annotate_with_mock_cv2(image, detection, (12, 8))
+
+        background = mock_cv2.rectangle.call_args_list[1].args
+        assert background[1][1] == 10
+        assert background[2][1] == detection.bbox.y1
+
+    @pytest.mark.integration
+    def test_annotate_label_background_ends_at_right_edge(self, sample_image):
+        image = sample_image[:24, :24]
+        detection = Detection("person", 0.9, BBox(18, 8, 23, 20))
+
+        mock_cv2, _ = self._annotate_with_mock_cv2(image, detection, (10, 8))
+
+        background = mock_cv2.rectangle.call_args_list[1].args
+        assert background[2][0] == image.shape[1]
+
+    @pytest.mark.integration
+    def test_annotate_label_wider_than_image_stays_in_bounds(self, sample_image):
+        image = sample_image[:24, :24]
+        detection = Detection("a very long label", 0.9, BBox(0, 8, 10, 20))
+
+        mock_cv2, _ = self._annotate_with_mock_cv2(image, detection, (30, 8))
+
+        background = mock_cv2.rectangle.call_args_list[1].args
+        text = mock_cv2.putText.call_args.args
+        assert background[1][0] == 0
+        assert background[2][0] == image.shape[1]
+        assert text[2][0] >= 0
 
     # -- from_dict (round-trip) -------------------------------------------------
 
@@ -310,6 +366,7 @@ class TestDetectionResult:
         mock_np = MagicMock()
         mock_image = MagicMock()
         mock_image.copy.return_value = mock_image
+        mock_image.shape = (100, 100, 3)
 
         dr = DetectionResult(detections=self._make_detections(), image=mock_image)
         polygons = [{"name": "yard", "value": [(0, 0), (100, 0), (100, 100), (0, 100)]}]
@@ -327,6 +384,7 @@ class TestDetectionResult:
         mock_np = MagicMock()
         mock_image = MagicMock()
         mock_image.copy.return_value = mock_image
+        mock_image.shape = (100, 100, 3)
 
         dr = DetectionResult(detections=self._make_detections(), image=mock_image)
 
@@ -346,6 +404,7 @@ class TestDetectionResult:
         mock_np = MagicMock()
         mock_image = MagicMock()
         mock_image.copy.return_value = mock_image
+        mock_image.shape = (100, 100, 3)
 
         eb = BBox(x1=0, y1=0, x2=10, y2=10)
         dr = DetectionResult(
@@ -370,6 +429,7 @@ class TestDetectionResult:
         mock_np = MagicMock()
         mock_image = MagicMock()
         mock_image.copy.return_value = mock_image
+        mock_image.shape = (100, 100, 3)
 
         eb = BBox(x1=0, y1=0, x2=10, y2=10)
         dr = DetectionResult(
