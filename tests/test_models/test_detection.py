@@ -282,6 +282,68 @@ class TestDetectionResult:
         assert background[2][0] == image.shape[1]
         assert text[2][0] >= 0
 
+    @pytest.mark.integration
+    def test_annotate_label_text_visible_at_top_edge(self):
+        cv2 = pytest.importorskip("cv2")
+        np = pytest.importorskip("numpy")
+        image = np.zeros((64, 180, 3), dtype=np.uint8)
+        detection = Detection("person", 0.9, BBox(5, 0, 30, 25))
+
+        result = DetectionResult(detections=[detection], image=image).annotate()
+
+        label_text = "person 90%"
+        (text_width, text_height), text_baseline = cv2.getTextSize(
+            label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 1,
+        )
+        expected_text = np.zeros(
+            (text_height + text_baseline + 1, text_width + 1, 3), dtype=np.uint8,
+        )
+        cv2.putText(
+            expected_text, label_text, (0, text_height), cv2.FONT_HERSHEY_SIMPLEX,
+            0.8, (255, 255, 255), 1,
+        )
+        expected_pixels = np.count_nonzero(np.all(expected_text == 255, axis=2))
+        visible_pixels = np.count_nonzero(np.all(result == 255, axis=2))
+        assert visible_pixels == expected_pixels
+
+    @pytest.mark.integration
+    def test_annotate_right_edge_keeps_full_label_visible(self):
+        cv2 = pytest.importorskip("cv2")
+        np = pytest.importorskip("numpy")
+        image = np.zeros((80, 180, 3), dtype=np.uint8)
+        detection = Detection("person", 0.9, BBox(155, 30, 179, 60))
+        label_text = "person 90%"
+        (text_width, text_height), text_baseline = cv2.getTextSize(
+            label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 1,
+        )
+        expected_text = np.zeros(
+            (text_height + text_baseline + 1, text_width + 1, 3), dtype=np.uint8,
+        )
+        cv2.putText(
+            expected_text, label_text, (0, text_height), cv2.FONT_HERSHEY_SIMPLEX,
+            0.8, (255, 255, 255), 1,
+        )
+
+        result = DetectionResult(detections=[detection], image=image).annotate()
+
+        expected_pixels = np.count_nonzero(np.all(expected_text == 255, axis=2))
+        visible_pixels = np.count_nonzero(np.all(result == 255, axis=2))
+        assert visible_pixels == expected_pixels
+
+    @pytest.mark.integration
+    def test_annotate_label_wider_than_image_stays_inside_background(self, sample_image):
+        cv2 = pytest.importorskip("cv2")
+        image = sample_image[:64, :32]
+        detection = Detection("a very long label", 0.9, BBox(20, 30, 31, 50))
+
+        result = DetectionResult(detections=[detection], image=image).annotate()
+
+        label_text = "a very long label 90%"
+        (_, text_height), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 1)
+        background_top = detection.bbox.y1 - text_height - 4
+        assert tuple(result[background_top, 0]) == (39, 174, 96)
+        assert tuple(result[background_top, image.shape[1] - 1]) == (39, 174, 96)
+
     # -- from_dict (round-trip) -------------------------------------------------
 
     def test_from_dict_round_trip(self):
