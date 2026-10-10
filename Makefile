@@ -22,7 +22,7 @@ help:
 # The pre-push gate. Fast, hermetic, deterministic. This is the contract:
 # green here means the change broke nothing that ran without external deps.
 gate:
-	$(PYTEST) tests/ $(TIER1_SELECT) -q
+	$(PYTEST) tests/ $(TIER1_SELECT) -q -rs
 	sh scripts/gates/ratchet.sh
 
 # Counts that may fall but never grow (AGENTS.md C7). See .ratchet-counters.
