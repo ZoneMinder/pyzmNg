@@ -40,7 +40,8 @@ Path: `request` on `ZMAPI` (`pyzm/zm/api.py`) for ZoneMinder; any other
 requests call passes timeout=.
 Never: a requests call without a timeout; a hung server then hangs
 detection for the event.
-Gate: the ratchet holds http_calls_without_timeout.
+Gate: the ratchet holds http_calls_without_timeout
+(`scripts/gates/count_http_without_timeout.py`).
 
 ### Logging
 Owns: diagnostic output from library code.
