@@ -174,15 +174,33 @@ class DetectionResult:
             cv2.rectangle(image, (b.x1, b.y1), (b.x2, b.y2), color, 2)
 
             font = cv2.FONT_HERSHEY_SIMPLEX
-            text_size = cv2.getTextSize(label_text, font, 0.8, 1)[0]
+            (text_w, text_h), _ = cv2.getTextSize(label_text, font, 0.8, 1)
+            img_width = image.shape[1]
+
+            bg_y1 = b.y1 - text_h - 4
+            bg_y2 = b.y1
+            text_y = b.y1 - 2
+            if b.y1 - text_h - 4 < 0:
+                bg_y1 = b.y1
+                bg_y2 = b.y1 + text_h + 4
+                text_y = b.y1 + text_h + 2
+
+            bg_x1 = b.x1
+            bg_x2 = b.x1 + text_w + 4
+            text_x = b.x1 + 2
+            if bg_x2 > img_width:
+                bg_x2 = img_width
+                bg_x1 = max(0, img_width - text_w - 4)
+                text_x = bg_x1 + 2
+
             cv2.rectangle(
                 image,
-                (b.x1, b.y1 - text_size[1] - 4),
-                (b.x1 + text_size[0] + 4, b.y1),
+                (bg_x1, bg_y1),
+                (bg_x2, bg_y2),
                 color,
                 -1,
             )
-            cv2.putText(image, label_text, (b.x1 + 2, b.y1 - 2), font, 0.8, (255, 255, 255), 1)
+            cv2.putText(image, label_text, (text_x, text_y), font, 0.8, (255, 255, 255), 1)
 
         if draw_error_boxes:
             for eb in self.error_boxes:
