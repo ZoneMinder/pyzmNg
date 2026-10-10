@@ -21,7 +21,8 @@ Never: renaming or removing a wire key, or changing a signature ES calls,
 without the matching ES change; a test mock of a pyzm class that differs from
 the real one. Before changing this shape, read the ES call sites in
 hook/zm_detect.py and hook/zmes_hook_helpers/ in ES.
-Gate: `tests/test_models/test_wire_contract.py`; the es-contract CI job
+Gate: `tests/test_models/test_wire_contract.py`;
+`scripts/gates/mutation_smoke.py` (wire key rename); the es-contract CI job
 runs ES's hook/tests/test_pyzm_contract.py against this checkout; review for
 mock fidelity.
 
@@ -32,7 +33,8 @@ request exception that reaches a log line or an error string.
 Never: an authenticated URL, params dict, or requests exception logged or
 returned unredacted. ZM tokens and ALPR keys leaked this way twice
 (ab1464b, afcb373).
-Gate: `tests/test_zm/test_auth.py`; review for new log lines.
+Gate: `tests/test_zm/test_auth.py`; `scripts/gates/mutation_smoke.py`
+(redaction off); review for new log lines.
 
 ### Outbound HTTP
 Owns: every HTTP request pyzm makes.
