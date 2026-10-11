@@ -81,7 +81,7 @@ files).
 ## Verification
 
 ```
-make gate            # Tier-1 unit + integration, instruction gate, ratchet; ~20s
+make gate            # Tier-1 unit + integration, instruction gate, ratchet; ~10s
 make release-gate    # gate + ML and ZM e2e with PYZM_E2E_REQUIRE=1
 make mutation        # mutation smoke
 ```
