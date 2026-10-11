@@ -1,0 +1,3 @@
+files_over_400 10
+http_calls_without_timeout 2
+isinstance_only_asserts 97

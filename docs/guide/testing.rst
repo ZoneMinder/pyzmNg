@@ -197,3 +197,51 @@ Pytest markers
      - ZM E2E tests that mutate state (event notes, stop/start/restart, DB
        tagging). Excluded from CI; opt-in via ``ZM_E2E_WRITE=1``. Run
        manually: ``sudo -u www-data ZM_E2E_WRITE=1 python -m pytest tests/test_zm_e2e/ -v -p no:cacheprovider``
+
+
+Gates
+-----
+
+``make gate`` runs the Tier-1 tests, which include the instruction gate, and
+then the ratchet. It takes about 20 seconds and needs no models. Run
+``make hooks`` once per clone: the pre-commit hook then runs the instruction
+gate and the ratchet, and the pre-push hook runs ``make gate``.
+
+.. code-block:: bash
+
+   make hooks                         # once per clone
+   make gate                          # before every push
+   make mutation                      # mutation smoke, also run in CI
+   sh scripts/gates/proven-red.sh origin/master HEAD
+
+The pieces, and what each one fails on:
+
+- ``tests/test_instruction_gate.py`` checks the agent instruction files
+  (``AGENTS.md``, ``AGENTS.project.md``, ``agents/``). It fails when a
+  contract names a file or symbol that does not exist, when a cited commit
+  is missing, when a plan file is tracked, or when library code calls
+  ``print()``.
+- ``scripts/gates/ratchet.sh`` counts known problems listed in
+  ``.ratchet-counters`` (files over 400 lines, ``requests`` calls without a
+  timeout, ``assert isinstance(`` lines in tests) and fails when a count rises
+  above ``.ratchet-baseline``. After a fix, run
+  ``sh scripts/gates/ratchet.sh --update`` to lower the baseline. It refuses
+  to raise a number; a raise is a hand edit with the reason in the commit
+  message.
+- ``scripts/gates/proven-red.sh <base> <head>`` copies the test files a
+  branch changed into a worktree of the code before the branch and runs them
+  there with the Tier-1 markers. It fails when a changed test passes on the
+  old code, and when source changed and no test did.
+- ``scripts/gates/mutation_smoke.py`` breaks ``redact_secrets``, renames a
+  ``DetectionResult`` wire key, and flips ``is_throttled``, and fails when the
+  tests for that module still pass.
+- ``scripts/gates/pr-body-check.sh`` runs on pull requests. It fails when the
+  body has no ``## Acceptance`` content, when a ``feat`` PR has no
+  ``## Spec`` section, or when the PR edits ``CHANGELOG.md``.
+
+GitHub Actions (``.github/workflows/ci.yml``) runs ``make gate``, proven red,
+the mutation smoke, and the PR body check on every push to ``master`` and
+every pull request. A fourth job, ``es-contract``, checks out
+zmeventnotificationNg master and runs its ``hook/tests/test_pyzm_contract.py``
+against this checkout with ``ZM_E2E_REQUIRE=1``, so a change that breaks the
+shape ES reads fails here, before it merges.

@@ -1,0 +1,5 @@
+# Ratchet counters (AGENTS.md C7): name<TAB>shell command printing one number.
+# Run from the repo root by scripts/gates/ratchet.sh.
+files_over_400	git ls-files 'pyzm/*.py' 'scripts/*.sh' 'scripts/*.py' | while read f; do grep -cvE '^[[:space:]]*(#.*)?$' "$f"; done | awk '$1>400' | wc -l
+http_calls_without_timeout	python3 scripts/gates/count_http_without_timeout.py --count
+isinstance_only_asserts	git ls-files 'tests/*.py' | xargs cat | grep -E '^[[:space:]]*assert isinstance\(' | wc -l
