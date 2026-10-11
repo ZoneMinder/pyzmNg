@@ -25,7 +25,7 @@ Read before writing or changing tests.
 ## Commands
 
 ```bash
-make gate                                         # Tier-1, ~20s
+make gate                                         # Tier-1, ~10s
 python3 -m pytest tests/test_zm/test_auth.py -q   # one file
 make release-gate                                 # ML and ZM e2e; needs models and a live ZM
 make -C ~/fiddle/zmeventnotificationNg test-all   # ES gate plus this gate

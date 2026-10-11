@@ -203,7 +203,7 @@ Gates
 -----
 
 ``make gate`` runs the Tier-1 tests, which include the instruction gate, and
-then the ratchet. It takes about 20 seconds and needs no models. Run
+then the ratchet. It takes about 10 seconds and needs no models. Run
 ``make hooks`` once per clone: the pre-commit hook then runs the instruction
 gate and the ratchet, and the pre-push hook runs ``make gate``.
 

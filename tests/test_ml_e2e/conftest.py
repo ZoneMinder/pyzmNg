@@ -62,6 +62,9 @@ def pytest_collection_modifyitems(config, items):
     skip_image = pytest.mark.skip(reason=f"Test image {BIRD_IMAGE} not found")
     for item in items:
         if "test_ml_e2e" in str(item.fspath):
+            # Every test here needs models, so `-m "not e2e"` (Tier-1) must
+            # drop it even when the test itself carries no marker.
+            item.add_marker(pytest.mark.e2e)
             if not os.path.isdir(BASE_PATH):
                 item.add_marker(skip_models)
             if not os.path.isfile(BIRD_IMAGE):

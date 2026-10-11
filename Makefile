@@ -13,7 +13,7 @@ TIER1_SELECT := -m "not e2e and not zm_e2e and not serve"
 .PHONY: gate release-gate test ratchet mutation hooks help
 
 help:
-	@echo "make gate          - fast pre-push gate (Tier-1 + ratchet, ~20s)"
+	@echo "make gate          - fast pre-push gate (Tier-1 + ratchet, ~10s)"
 	@echo "make mutation      - mutation smoke: risky modules' tests must catch a broken line"
 	@echo "make release-gate  - full gate incl. e2e (needs models + live ZM)"
 	@echo "make test          - run everything pytest can collect"

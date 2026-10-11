@@ -2,7 +2,7 @@
 # pyzm pre-push gate. Blocks a push when the Tier-1 suite is red.
 # Install once with: make hooks   (sets core.hooksPath -> .githooks)
 #
-# Tier-1 only (unit + integration, ~20s, no models/GPU/live-ZM). The full
+# Tier-1 only (unit + integration, ~10s, no models/GPU/live-ZM). The full
 # e2e gate is `make release-gate`, run before cutting a release on a box
 # that has models and a live ZoneMinder.
 #
