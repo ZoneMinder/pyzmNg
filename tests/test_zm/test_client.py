@@ -444,6 +444,22 @@ class TestMonitorOOP:
         mock_api.get.assert_called_with("monitors/alarm/id:5/command:on.json")
 
     @patch("pyzm.client.ZMAPI")
+    def test_monitor_arm_cause(self, mock_zmapi_cls):
+        mock_api = _make_mock_api()
+        mock_api.get.return_value = {"monitors": [_sample_monitor_api_data(5)]}
+        mock_zmapi_cls.return_value = mock_api
+
+        from pyzm.client import ZMClient
+        client = ZMClient(api_url="https://zm.example.com/zm/api")
+
+        m = client.monitor(5)
+        mock_api.get.reset_mock()
+        m.arm(cause="Doorbell")
+        mock_api.get.assert_called_with(
+            "monitors/alarm/id:5/command:on.json", params={"cause": "Doorbell"}
+        )
+
+    @patch("pyzm.client.ZMAPI")
     def test_monitor_disarm(self, mock_zmapi_cls):
         mock_api = _make_mock_api()
         mock_api.get.return_value = {"monitors": [_sample_monitor_api_data(5)]}

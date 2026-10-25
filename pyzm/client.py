@@ -339,9 +339,12 @@ class ZMClient:
             ))
         return zones
 
-    def _arm(self, monitor_id: int) -> dict:
-        """Trigger alarm ON for a monitor."""
-        return self._api.get(f"monitors/alarm/id:{monitor_id}/command:on.json")
+    def _arm(self, monitor_id: int, cause: str | None = None) -> dict:
+        """Trigger alarm ON for a monitor, with an optional event cause."""
+        endpoint = f"monitors/alarm/id:{monitor_id}/command:on.json"
+        if cause:
+            return self._api.get(endpoint, params={"cause": cause})
+        return self._api.get(endpoint)
 
     def _disarm(self, monitor_id: int) -> dict:
         """Cancel alarm for a monitor."""

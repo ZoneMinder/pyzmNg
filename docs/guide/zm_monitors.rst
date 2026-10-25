@@ -53,6 +53,7 @@ Monitor control
 
    # Alarm control
    m.arm()                              # trigger alarm
+   m.arm(cause="Doorbell")              # trigger alarm, the event's cause "Doorbell"
    m.disarm()                           # cancel alarm
    m.alarm_state()                      # "idle", "prealarm", "alarm", "alert", "tape" or "unknown"
    m.alarm_status()                     # the raw API response, e.g. {"status": 0, "output": 0}
@@ -64,6 +65,11 @@ Monitor control
 
    # Daemon status
    m.daemon_status()                    # capture daemon (zmc) status
+
+``arm()`` events record the cause "Forced Web" unless ``cause`` is given.
+ZoneMinder records ``cause`` only where its ``zmu`` has ``--cause``; older
+versions ignore it and still record "Forced Web". ZoneMinder keeps letters,
+digits, spaces and plain punctuation, and the first 31 bytes.
 
 ``alarm_state()`` turns the status number into a name, including on ZM
 1.36.16 through 1.36.25, where the API reports every state one higher than
