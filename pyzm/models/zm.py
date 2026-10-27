@@ -388,10 +388,9 @@ class Monitor:
     def arm(self, cause: str | None = None) -> dict:
         """Trigger alarm ON for this monitor.
 
-        ``cause`` is recorded on the event in place of "Forced Web" by
-        ZoneMinder versions whose ``zmu`` has ``--cause``; older ones ignore
-        it. ZoneMinder keeps letters, digits, spaces and plain punctuation,
-        and the first 31 bytes.
+        ``cause`` is recorded on the event in place of "Forced Web"; see
+        ``docs/guide/zm_monitors.rst`` for which ZoneMinder versions honor it
+        and how ZoneMinder filters it.
         """
         self._require_client()
         return self._client._arm(self.id, cause)
