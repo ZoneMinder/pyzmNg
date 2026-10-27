@@ -1,9 +1,7 @@
 #!/usr/bin/python3
 
-import io
 import os
 import re
-import codecs
 
 from setuptools import setup, find_packages
 
@@ -52,7 +50,7 @@ with open(os.path.join(here, 'README.md'), encoding='utf-8') as f:
     f.close()
 
 def read(*parts):
-    with codecs.open(os.path.join(here, *parts), 'r') as fp:
+    with open(os.path.join(here, *parts), encoding='utf-8') as fp:
         data = fp.read()
         fp.close()
         return data
