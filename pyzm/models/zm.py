@@ -385,10 +385,15 @@ class Monitor:
         self._require_client()
         return self._client._monitor_zones(self.id)
 
-    def arm(self) -> dict:
-        """Trigger alarm ON for this monitor."""
+    def arm(self, cause: str | None = None) -> dict:
+        """Trigger alarm ON for this monitor.
+
+        ``cause`` is recorded on the event in place of "Forced Web"; see
+        ``docs/guide/zm_monitors.rst`` for which ZoneMinder versions honor it
+        and how ZoneMinder filters it.
+        """
         self._require_client()
-        return self._client._arm(self.id)
+        return self._client._arm(self.id, cause)
 
     def disarm(self) -> dict:
         """Cancel alarm for this monitor."""
