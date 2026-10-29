@@ -94,6 +94,12 @@ def test_installation_doc_lists_each_extras_packages():
                      if name != "full"}
 
 
+def test_setup_reads_its_files_without_codecs_open():
+    """Python 3.14 deprecates codecs.open(); with warnings as errors every test here failed on it."""
+    with patch("codecs.open", side_effect=AssertionError("setup.py called codecs.open()")):
+        assert _setup_kwargs()["version"]
+
+
 def test_full_is_the_union_of_the_other_extras():
     extras = {k: _names(v) for k, v in _setup_kwargs()["extras_require"].items()}
     full = extras.pop("full")
