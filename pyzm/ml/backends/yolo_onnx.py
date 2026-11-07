@@ -129,7 +129,20 @@ class YoloOnnx(YoloBase):
                         self.pre_nms_layer = "onnx_node!" + node.name
                         break
 
-                if self.is_native_e2e:
+                # OpenCV 4.x runs the YOLO26 TopK tail wrong: junk confidences,
+                # and on some frames a crash ("axis is 300").  The pre-NMS
+                # layer is correct, so read it instead.  OpenCV 5 is fine.
+                # Refs #95, ZoneMinder/zmeventnotificationNg#74
+                if self.is_native_e2e and self.pre_nms_layer and _cv2_version() < (5, 0, 0):
+                    self.is_native_e2e = False
+                    logger.debug(
+                        "%s: OpenCV %s mis-runs the native end-to-end output, "
+                        "reading pre-NMS layer %s instead",
+                        self.name,
+                        ".".join(map(str, _cv2_version())),
+                        self.pre_nms_layer,
+                    )
+                elif self.is_native_e2e:
                     if self.pre_nms_layer:
                         logger.debug(
                             "%s: Pre-NMS fallback layer: %s",

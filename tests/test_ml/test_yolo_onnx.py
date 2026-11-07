@@ -133,6 +133,59 @@ class TestParseNativeE2E:
         assert yolo.is_native_e2e is True
 
 
+def _fake_yolo26_onnx(*, with_pre_nms: bool = True):
+    """A stand-in ``onnx`` module whose load() returns a YOLO26-style graph."""
+    from types import SimpleNamespace as NS
+
+    nodes = [NS(op_type="Conv", name="/model.0/Conv")]
+    if with_pre_nms:
+        nodes += [NS(op_type="Transpose", name="/model.23/Transpose"),
+                  NS(op_type="Split", name="/model.23/Split")]
+    dims = [NS(dim_value=v) for v in (1, 300, 6)]
+    model = NS(
+        metadata_props=[NS(key="end2end", value="True"),
+                        NS(key="names", value="{0: 'person', 1: 'car'}")],
+        graph=NS(
+            output=[NS(type=NS(tensor_type=NS(shape=NS(dim=dims))))],
+            node=nodes,
+        ),
+    )
+    return NS(load=lambda _path: model)
+
+
+class TestNativeE2EByOpenCVVersion:
+    """OpenCV 4.x runs YOLO26's built-in TopK tail wrong: junk confidences on
+    every frame, and on some frames a crash ('axis is 300').  The pre-NMS layer
+    is correct there, so 4.x must use it.  OpenCV 5 runs the tail correctly.
+    Refs #95, ZoneMinder/zmeventnotificationNg#74
+    """
+
+    @staticmethod
+    def _load(cv2_ver, **kw):
+        yolo = TestMissingOnnxPackage._make()
+        with patch.dict(sys.modules, {"onnx": _fake_yolo26_onnx(**kw)}), \
+             patch("pyzm.ml.backends.yolo_onnx._cv2_version", return_value=cv2_ver):
+            classes = yolo._load_onnx_metadata()
+        assert classes == ["person", "car"]
+        return yolo
+
+    def test_opencv4_reads_pre_nms_layer(self):
+        yolo = self._load((4, 13, 0))
+        assert yolo.is_end2end is True
+        assert yolo.is_native_e2e is False
+        assert yolo.pre_nms_layer == "onnx_node!/model.23/Transpose"
+
+    def test_opencv5_reads_native_output(self):
+        yolo = self._load((5, 0, 0))
+        assert yolo.is_native_e2e is True
+
+    def test_opencv4_without_pre_nms_layer_keeps_native(self):
+        """No pre-NMS layer to read → the native output is the only option."""
+        yolo = self._load((4, 13, 0), with_pre_nms=False)
+        assert yolo.is_native_e2e is True
+        assert yolo.pre_nms_layer is None
+
+
 class TestMissingOnnxPackage:
     """The optional ``onnx`` dependency is what reads labels/metadata."""
 
