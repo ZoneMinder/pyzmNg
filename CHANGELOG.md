@@ -3,6 +3,25 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.5.7] - 2026-11-07
+
+### Bug Fixes
+
+- read the pre-NMS layer for yolo26 on OpenCV 4.x ([bc2023e](https://github.com/ZoneMinder/pyzmNg/commit/bc2023ef5e7bcb1d77a6a32e26acea3b0c766a4b))
+- read the version with open(), not codecs.open() ([8dac7bf](https://github.com/ZoneMinder/pyzmNg/commit/8dac7bf713aed3f1a1e2c118b938a834c85dea26))
+
+### Documentation
+
+- point arm() docstring at the guide for cause filtering ([401b999](https://github.com/ZoneMinder/pyzmNg/commit/401b9998fa9247929afc809a3540c1b13477986d))
+
+### Features
+
+- optional event cause for Monitor.arm() ([ced8657](https://github.com/ZoneMinder/pyzmNg/commit/ced8657400939689590a5dcc01b5212f102dbe45))
+
+### Miscellaneous
+
+- bump version to v2.5.7 ([8a0e67b](https://github.com/ZoneMinder/pyzmNg/commit/8a0e67be5f7efc8da6645b7b49008a1bbbc929ea))
+
 ## [2.5.6] - 2026-10-25
 
 ### Bug Fixes
@@ -15,6 +34,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- update CHANGELOG for v2.5.6 ([f84ee5f](https://github.com/ZoneMinder/pyzmNg/commit/f84ee5f43b972796e168a4f69b0de0bc564c7dc8))
 - record ZM API quirks found while adding the client features ([f7b3d58](https://github.com/ZoneMinder/pyzmNg/commit/f7b3d580cc64437270eaa6fb7efbed5d11dde92e))
 - list every package per extra and document the new client features ([9a7d657](https://github.com/ZoneMinder/pyzmNg/commit/9a7d657dfe5875dbe9805b6c6dfde80c4036496e))
 
