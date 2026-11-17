@@ -61,7 +61,7 @@ def _cv2_version() -> tuple[int, int, int]:
     )
 
 
-class YoloBase(MLBackend, PortalockerMixin):
+class YoloBase(PortalockerMixin, MLBackend):
     """Shared base for Darknet and ONNX YOLO backends.
 
     Subclasses must implement:

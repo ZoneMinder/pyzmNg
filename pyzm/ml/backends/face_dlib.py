@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pyzm.ml")
 
 
-class FaceDlibBackend(MLBackend, PortalockerMixin):
+class FaceDlibBackend(PortalockerMixin, MLBackend):
     """dlib-based face recognition backend.
 
     Detects faces using HOG or CNN models via the ``face_recognition`` library,

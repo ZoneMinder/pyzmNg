@@ -832,6 +832,21 @@ class TestSessionLocking:
         mock_backend.acquire_lock.assert_not_called()
         mock_backend.release_lock.assert_not_called()
 
+    @pytest.mark.parametrize("module, cls_name", [
+        ("pyzm.ml.backends.coral", "CoralBackend"),
+        ("pyzm.ml.backends.yolo", "YoloBase"),
+        ("pyzm.ml.backends.face_dlib", "FaceDlibBackend"),
+        ("pyzm.ml.backends.face_tpu", "FaceTpuBackend"),
+    ])
+    def test_lock_methods_resolve_to_portalocker(self, module, cls_name):
+        """MLBackend's no-op lock methods must not shadow PortalockerMixin (#97)."""
+        import importlib
+        from pyzm.ml.backends.base import PortalockerMixin
+
+        cls = getattr(importlib.import_module(module), cls_name)
+        assert cls.acquire_lock is PortalockerMixin.acquire_lock
+        assert cls.release_lock is PortalockerMixin.release_lock
+
 
 # ===================================================================
 # TestFirstNewMultiFrame (Ref: ZoneMinder/pyzm#35)
