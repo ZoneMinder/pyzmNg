@@ -847,6 +847,45 @@ class TestSessionLocking:
         assert cls.acquire_lock is PortalockerMixin.acquire_lock
         assert cls.release_lock is PortalockerMixin.release_lock
 
+    def test_detect_event_loads_exclusive_backend_under_lock(self):
+        """detect_event takes the session lock before the backend loads (#97)."""
+        import numpy as np
+
+        from pyzm.ml.detector import Detector
+
+        events: list[str] = []
+
+        class FakeTpu:
+            name = "fake_tpu"
+            needs_exclusive_lock = True
+            _model = None
+
+            def acquire_lock(self):
+                events.append("lock")
+
+            def release_lock(self):
+                events.append("unlock")
+
+            def load(self):
+                events.append("load")
+                self._model = object()
+
+            def detect(self, image):
+                if self._model is None:
+                    self.load()
+                events.append("detect")
+                return []
+
+        det = Detector(config=DetectorConfig(models=[ModelConfig(name="coral_model")]))
+        mock_zm = MagicMock()
+        mock_zm.event.return_value.extract_frames.return_value = (
+            [(1, np.zeros((10, 10, 3), dtype=np.uint8))], {"original": (10, 10)},
+        )
+        with patch("pyzm.ml.pipeline._create_backend", return_value=FakeTpu()):
+            det.detect_event(mock_zm, 123)
+
+        assert events == ["lock", "load", "detect", "unlock"]
+
 
 # ===================================================================
 # TestFirstNewMultiFrame (Ref: ZoneMinder/pyzm#35)

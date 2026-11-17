@@ -513,7 +513,9 @@ class Detector:
             logger.warning("No frames extracted for event %d", event_id)
             return DetectionResult()
 
-        pipeline = self._ensure_pipeline()
+        # Lazy: exclusive-hardware backends (Coral) must load under the
+        # session lock that _detect_multi_frame takes, not before it.
+        pipeline = self._ensure_pipeline(lazy=True)
 
         # Extract audio if any enabled model needs it
         wav_path = None
