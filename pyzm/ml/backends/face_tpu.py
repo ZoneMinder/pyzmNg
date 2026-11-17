@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pyzm.ml")
 
 
-class FaceTpuBackend(MLBackend, PortalockerMixin):
+class FaceTpuBackend(PortalockerMixin, MLBackend):
     """Coral TPU face detection-only backend.
 
     Uses pycoral adapters for TPU inference. Detection only — all faces

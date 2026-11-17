@@ -832,6 +832,60 @@ class TestSessionLocking:
         mock_backend.acquire_lock.assert_not_called()
         mock_backend.release_lock.assert_not_called()
 
+    @pytest.mark.parametrize("module, cls_name", [
+        ("pyzm.ml.backends.coral", "CoralBackend"),
+        ("pyzm.ml.backends.yolo", "YoloBase"),
+        ("pyzm.ml.backends.face_dlib", "FaceDlibBackend"),
+        ("pyzm.ml.backends.face_tpu", "FaceTpuBackend"),
+    ])
+    def test_lock_methods_resolve_to_portalocker(self, module, cls_name):
+        """MLBackend's no-op lock methods must not shadow PortalockerMixin (#97)."""
+        import importlib
+        from pyzm.ml.backends.base import PortalockerMixin
+
+        cls = getattr(importlib.import_module(module), cls_name)
+        assert cls.acquire_lock is PortalockerMixin.acquire_lock
+        assert cls.release_lock is PortalockerMixin.release_lock
+
+    def test_detect_event_loads_exclusive_backend_under_lock(self):
+        """detect_event takes the session lock before the backend loads (#97)."""
+        import numpy as np
+
+        from pyzm.ml.detector import Detector
+
+        events: list[str] = []
+
+        class FakeTpu:
+            name = "fake_tpu"
+            needs_exclusive_lock = True
+            _model = None
+
+            def acquire_lock(self):
+                events.append("lock")
+
+            def release_lock(self):
+                events.append("unlock")
+
+            def load(self):
+                events.append("load")
+                self._model = object()
+
+            def detect(self, image):
+                if self._model is None:
+                    self.load()
+                events.append("detect")
+                return []
+
+        det = Detector(config=DetectorConfig(models=[ModelConfig(name="coral_model")]))
+        mock_zm = MagicMock()
+        mock_zm.event.return_value.extract_frames.return_value = (
+            [(1, np.zeros((10, 10, 3), dtype=np.uint8))], {"original": (10, 10)},
+        )
+        with patch("pyzm.ml.pipeline._create_backend", return_value=FakeTpu()):
+            det.detect_event(mock_zm, 123)
+
+        assert events == ["lock", "load", "detect", "unlock"]
+
 
 # ===================================================================
 # TestFirstNewMultiFrame (Ref: ZoneMinder/pyzm#35)

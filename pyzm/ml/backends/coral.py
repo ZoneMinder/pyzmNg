@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pyzm.ml")
 
 
-class CoralBackend(MLBackend, PortalockerMixin):
+class CoralBackend(PortalockerMixin, MLBackend):
     """Coral EdgeTPU object detection backend using pycoral.
 
     The EdgeTPU device is single-use, so this backend declares
