@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.5.8] - 2026-11-17
+
+### Bug Fixes
+
+- load models lazily in detect_event so Coral loads under the lock ([fe0dff1](https://github.com/ZoneMinder/pyzmNg/commit/fe0dff101842a78252cc91e6ee254c324a59b979))
+- put PortalockerMixin first so backend locks aren't no-ops ([a93ccaf](https://github.com/ZoneMinder/pyzmNg/commit/a93ccaff0fe4b376420672b3472a835037722d15))
+
+### Miscellaneous
+
+- bump version to v2.5.8 ([df839a7](https://github.com/ZoneMinder/pyzmNg/commit/df839a7c76346dba393ebc7e9259635de00b796a))
+
 ## [2.5.7] - 2026-11-07
 
 ### Bug Fixes
@@ -12,6 +23,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 
+- update CHANGELOG for v2.5.7 ([1dd1249](https://github.com/ZoneMinder/pyzmNg/commit/1dd12497b62b72e368b95b875068d028a48f65ac))
 - point arm() docstring at the guide for cause filtering ([401b999](https://github.com/ZoneMinder/pyzmNg/commit/401b9998fa9247929afc809a3540c1b13477986d))
 
 ### Features
