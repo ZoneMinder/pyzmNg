@@ -76,14 +76,13 @@ class PortalockerMixin:
         processor = getattr(self, "processor", None) or cfg.processor.value
         self._lock_name = f"pyzm_uid{os.getuid()}_{processor}_lock"
 
-        def _setting(key: str) -> int:
+        def _setting(key: str, default: int) -> int:
             # Explicit max_processes/max_lock_wait win; else v1's <processor>_<key>.
-            if key in cfg.model_fields_set:
-                return getattr(cfg, key)
-            return int(cfg.options.get(f"{processor}_{key}", getattr(cfg, key)))
+            val = getattr(cfg, key)
+            return int(val if val is not None else cfg.options.get(f"{processor}_{key}", default))
 
-        self._lock_maximum = _setting("max_processes")
-        self._lock_timeout = _setting("max_lock_wait")
+        self._lock_maximum = _setting("max_processes", 1)
+        self._lock_timeout = _setting("max_lock_wait", 120)
 
         if not self._disable_locks:
             logger.debug(

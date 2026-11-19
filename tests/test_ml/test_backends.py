@@ -456,3 +456,23 @@ class TestLockFollowsProcessor:
             assert b._lock_name.endswith("_cpu_lock")
             b.load()
         assert b._lock_name.endswith("_gpu_lock")
+
+    @patch("pyzm.ml.backends.base.portalocker")
+    def test_legacy_keys_survive_multi_worker_round_trip(self, mock_portalocker):
+        """--workers > 1 rebuilds the config from JSON; v1 lock keys must still apply."""
+        from pyzm.models.config import DetectorConfig, ServerConfig
+        from pyzm.serve.app import config_from_env, config_to_env
+
+        dc = DetectorConfig.from_dict({
+            "general": {"model_sequence": "object"},
+            "object": {"general": {}, "sequence": [{"gpu_max_processes": 3, "gpu_max_lock_wait": 100}]},
+        })
+        raw = config_to_env(ServerConfig(detector_config=dc, workers=2))
+        with patch.dict("os.environ", {"PYZM_SERVER_CONFIG": raw}):
+            restored = config_from_env()
+        obj = self._stub("gpu")
+        obj._config = restored.detector_config.models[0]
+        obj._init_lock()
+        mock_portalocker.BoundedSemaphore.assert_called_once_with(
+            maximum=3, name=obj._lock_name, timeout=100,
+        )
