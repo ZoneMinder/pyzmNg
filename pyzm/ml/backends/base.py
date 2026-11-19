@@ -71,10 +71,19 @@ class PortalockerMixin:
         cfg: ModelConfig = self._config  # type: ignore[attr-defined]
         self._is_locked = False
         self._disable_locks = cfg.disable_locks
-        processor = cfg.processor.value
+        # The processor the backend runs on (tpu for Coral, gpu for dlib on CUDA),
+        # which can differ from the configured one.
+        processor = getattr(self, "processor", None) or cfg.processor.value
         self._lock_name = f"pyzm_uid{os.getuid()}_{processor}_lock"
-        self._lock_maximum = cfg.max_processes
-        self._lock_timeout = cfg.max_lock_wait
+
+        def _setting(key: str) -> int:
+            # Explicit max_processes/max_lock_wait win; else v1's <processor>_<key>.
+            if key in cfg.model_fields_set:
+                return getattr(cfg, key)
+            return int(cfg.options.get(f"{processor}_{key}", getattr(cfg, key)))
+
+        self._lock_maximum = _setting("max_processes")
+        self._lock_timeout = _setting("max_lock_wait")
 
         if not self._disable_locks:
             logger.debug(

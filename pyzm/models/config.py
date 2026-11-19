@@ -457,8 +457,12 @@ def _seq_item_to_model_config(
         allow_cpu_fallback=_bool(seq.get("allow_cpu_fallback", True), default=True),
         gpu_retry_seconds=int(seq.get("gpu_retry_seconds", 60)),
         disable_locks=_bool(seq.get("disable_locks") or global_general.get("disable_locks", "no")),
-        max_lock_wait=int(seq.get("max_lock_wait", global_general.get("max_lock_wait", 120))),
-        max_processes=int(seq.get("max_processes", global_general.get("max_processes", 1))),
+        # Only pass lock settings the user set, so the backend can tell them
+        # apart from defaults and fall back to v1's <processor>_max_processes.
+        **{
+            k: int(v) for k in ("max_lock_wait", "max_processes")
+            if (v := seq.get(k, global_general.get(k))) is not None
+        },
         pre_existing_labels=pre_existing if isinstance(pre_existing, list) else [],
         options=options,
     )
