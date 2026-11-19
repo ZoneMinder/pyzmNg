@@ -921,3 +921,78 @@ class TestGatewayCannotRunWarning:
         assert self.FRAME_URL in warning
         for key in [kv.split("=")[0] for kv in secret_query.split("&")]:
             assert f"{key}=***" in warning
+
+
+# ===================================================================
+# max_size (#99): downscale before inference, boxes back in original space
+# ===================================================================
+
+class TestMaxSizeResize:
+
+    def _run(self, mock_create, max_size, image_wh, det):
+        import numpy as np
+        from pyzm.ml.pipeline import ModelPipeline
+
+        seen = {}
+
+        def detect(img):
+            seen["shape"] = img.shape
+            return [det]
+
+        backend = _make_mock_backend("dlib", [])
+        backend.detect.side_effect = detect
+        mock_create.return_value = backend
+        mc = ModelConfig(
+            name="dlib", type=ModelType.FACE, framework=ModelFramework.FACE_DLIB,
+            pattern=".*", max_size=max_size,
+        )
+        pipeline = ModelPipeline(DetectorConfig(models=[mc]))
+        w, h = image_wh
+        result = pipeline.run(np.zeros((h, w, 3), dtype=np.uint8))
+        return seen["shape"], result.detections
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_downscales_and_rescales_boxes(self, mock_create):
+        shape, dets = self._run(
+            mock_create, 400, (800, 600), _det("erik", 100, 100, 200, 150),
+        )
+        assert shape[:2] == (300, 400)
+        b = dets[0].bbox
+        assert (b.x1, b.y1, b.x2, b.y2) == (200, 200, 400, 300)
+
+    @patch("pyzm.ml.pipeline._create_backend")
+    def test_es_example_face_entry_keeps_faces(self, mock_create):
+        # ES's example dlib entry carries max_size: 800. A 47x47 face must survive.
+        import numpy as np
+        from pyzm.ml.pipeline import ModelPipeline
+
+        mock_create.return_value = _make_mock_backend("dlib", [_det("erik", 145, 77, 192, 124)])
+        cfg = DetectorConfig.from_dict({
+            "general": {"model_sequence": "face"},
+            "face": {"general": {}, "sequence": [{
+                "name": "DLIB face recognition", "face_detection_framework": "dlib",
+                "known_images_path": "/tmp/known", "max_size": 800,
+            }]},
+        })
+        result = ModelPipeline(cfg).run(np.zeros((480, 640, 3), dtype=np.uint8))
+        assert [d.label for d in result.detections] == ["erik"]
+
+    def test_remote_backend_is_not_scaled_client_side(self):
+        """URL mode: the gateway infers on the full ZM frame and owns max_size.
+
+        Scaling client-side would multiply full-frame boxes a second time.
+        """
+        import numpy as np
+        from pyzm.ml.pipeline import _detect_scaled
+        from pyzm.ml.remote import RemoteInferenceBackend
+
+        client = MagicMock()
+        client.current_frame = {"url": "http://zm/frame"}
+        client.infer.return_value = [_det("erik", 1500, 100, 1900, 500)]
+        mc = ModelConfig(name="dlib", type=ModelType.FACE, framework=ModelFramework.FACE_DLIB, max_size=800)
+        backend = RemoteInferenceBackend(mc, client)
+
+        dets = _detect_scaled(backend, np.zeros((1080, 1920, 3), dtype=np.uint8), mc.max_size)
+        b = dets[0].bbox
+        assert (b.x1, b.y1, b.x2, b.y2) == (1500, 100, 1900, 500)
+        assert client.infer.call_args[0][0].shape[:2] == (1080, 1920)

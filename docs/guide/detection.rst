@@ -376,7 +376,16 @@ Per-model settings:
        pattern="(person|car|dog)",
        allow_cpu_fallback=True,          # degrade to CPU when CUDA errors
        gpu_retry_seconds=60,             # then retry the GPU after 60s
+       max_size=800,                     # downscale wider frames to 800 px before this model runs
    )
+
+``max_size`` (YAML key ``max_size`` on a sequence entry) shrinks the frame to
+that width before the model sees it, and maps the boxes back to the original
+frame. It's useful for dlib face recognition and ALPR, where a full-size frame
+costs time and memory. It doesn't filter anything; ``max_detection_size`` does
+that. For a model that runs on a remote gateway, the gateway's own
+``max_size`` for that model applies, since in URL mode the client never has
+the frame.
 
 A ``gpu`` model that hits a CUDA error moves to CPU so the frame is still
 detected, and retries the GPU after ``gpu_retry_seconds`` (doubling the wait

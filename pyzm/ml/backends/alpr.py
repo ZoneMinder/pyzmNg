@@ -101,20 +101,9 @@ class _AlprService:
     def _prepare(self, image_or_path) -> None:
         """Prepare the image: save blob to temp PNG or use existing file."""
         import cv2
-        import imutils
 
         if not isinstance(image_or_path, str):
             logger.debug("Supplied object is not a file, assuming blob and creating file")
-            max_size = self._config.max_detection_size
-            if max_size:
-                try:
-                    max_px = int(max_size.rstrip("%").rstrip("px"))
-                    logger.debug("resizing image blob to %d", max_px)
-                    image_or_path = imutils.resize(
-                        image_or_path, width=min(max_px, image_or_path.shape[1])
-                    )
-                except (ValueError, AttributeError):
-                    pass
             self.filename = "/tmp/" + str(uuid.uuid4()) + "-alpr.png"
             cv2.imwrite(self.filename, image_or_path)
             self.remove_temp = True
