@@ -60,8 +60,7 @@ class FaceDlibBackend(PortalockerMixin, MLBackend):
             self.processor = "gpu"
         else:
             self.processor = "cpu"
-        if self._lock_name != f"pyzm_uid{os.getuid()}_{self.processor}_lock":
-            self._init_lock()  # take the lock for the processor dlib really uses
+        self._sync_lock_to_processor()  # take the lock for the processor dlib really uses
 
         logger.info(
             "%s: loading face recognition model (processor=%s, model=%s)",

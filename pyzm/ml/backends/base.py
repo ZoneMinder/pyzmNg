@@ -49,6 +49,15 @@ class MLBackend(ABC):
         """True if this backend requires exclusive hardware (e.g. EdgeTPU)."""
         return False
 
+    def _sync_lock_to_processor(self) -> None:
+        """Re-create the lock when the backend moved to another processor
+        (dlib finding CUDA, YOLO falling back to CPU or back to GPU).
+        Never while held: the caller runs this before acquiring."""
+        processor = getattr(self, "processor", None)
+        if processor and not getattr(self, "_is_locked", False) and \
+                self._lock_name != f"pyzm_uid{os.getuid()}_{processor}_lock":
+            self._init_lock()
+
     def acquire_lock(self) -> None:
         """Acquire the hardware lock. No-op by default."""
 

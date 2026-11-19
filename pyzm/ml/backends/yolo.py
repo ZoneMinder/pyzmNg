@@ -140,6 +140,8 @@ class YoloBase(PortalockerMixin, MLBackend):
             Height,
         )
 
+        self._maybe_restore_gpu()
+        self._sync_lock_to_processor()
         if self._auto_lock:
             self.acquire_lock()
 
@@ -150,8 +152,6 @@ class YoloBase(PortalockerMixin, MLBackend):
             conf_threshold = 0.2
             if self._config.min_confidence < conf_threshold:
                 conf_threshold = self._config.min_confidence
-
-            self._maybe_restore_gpu()
 
             _t0 = _time.perf_counter()
             try:
