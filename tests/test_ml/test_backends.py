@@ -272,6 +272,19 @@ class TestAlprBugFixes:
         assert service._config.platerec_min_dscore == 0.5
         assert service._config.platerec_min_score == 0.7
 
+class TestAlprPrepareNoResize:
+    def test_max_detection_size_does_not_resize_blob(self, tmp_path):
+        """#99: max_detection_size is an area cap; it must not become a resize width."""
+        import numpy as np
+        from unittest.mock import patch
+        from pyzm.ml.backends.alpr import _PlateRecognizer
+
+        svc = _PlateRecognizer(ModelConfig(alpr_service="plate_recognizer", max_detection_size="90%"))
+        written = {}
+        with patch("cv2.imwrite", side_effect=lambda f, img: written.setdefault("shape", img.shape)):
+            svc._prepare(np.zeros((480, 640, 3), dtype=np.uint8))
+        assert written["shape"][:2] == (480, 640)
+
 
 class TestOpenAlprLogging:
     """What the OpenALPR backend logs about its request URL."""
@@ -376,17 +389,3 @@ class TestPipelineFactory:
         )
         backend = _create_backend(config)
         assert isinstance(backend, FaceTpuBackend)
-
-
-class TestAlprPrepareNoResize:
-    def test_max_detection_size_does_not_resize_blob(self, tmp_path):
-        """#99: max_detection_size is an area cap; it must not become a resize width."""
-        import numpy as np
-        from unittest.mock import patch
-        from pyzm.ml.backends.alpr import _PlateRecognizer
-
-        svc = _PlateRecognizer(ModelConfig(alpr_service="plate_recognizer", max_detection_size="90%"))
-        written = {}
-        with patch("cv2.imwrite", side_effect=lambda f, img: written.setdefault("shape", img.shape)):
-            svc._prepare(np.zeros((480, 640, 3), dtype=np.uint8))
-        assert written["shape"][:2] == (480, 640)
