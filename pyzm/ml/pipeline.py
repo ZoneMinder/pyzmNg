@@ -52,8 +52,12 @@ _WEIGHTS_REQUIRED_FRAMEWORKS = frozenset({
 
 def _detect_scaled(backend: MLBackend, image: "np.ndarray", max_size: int | None) -> list[Detection]:
     """Run *backend* on *image* downscaled to *max_size* wide, boxes in original coordinates."""
+    from pyzm.ml.remote import RemoteInferenceBackend
+
     h, w = image.shape[:2]
-    if not max_size or w <= max_size:
+    # A gateway model is scaled by the gateway's /infer with its own max_size;
+    # in URL mode it never sees this image, so scaling here would double-scale.
+    if not max_size or w <= max_size or isinstance(backend, RemoteInferenceBackend):
         return backend.detect(image)
     import cv2
 

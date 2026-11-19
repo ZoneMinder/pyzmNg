@@ -976,3 +976,23 @@ class TestMaxSizeResize:
         })
         result = ModelPipeline(cfg).run(np.zeros((480, 640, 3), dtype=np.uint8))
         assert [d.label for d in result.detections] == ["erik"]
+
+    def test_remote_backend_is_not_scaled_client_side(self):
+        """URL mode: the gateway infers on the full ZM frame and owns max_size.
+
+        Scaling client-side would multiply full-frame boxes a second time.
+        """
+        import numpy as np
+        from pyzm.ml.pipeline import _detect_scaled
+        from pyzm.ml.remote import RemoteInferenceBackend
+
+        client = MagicMock()
+        client.current_frame = {"url": "http://zm/frame"}
+        client.infer.return_value = [_det("erik", 1500, 100, 1900, 500)]
+        mc = ModelConfig(name="dlib", type=ModelType.FACE, framework=ModelFramework.FACE_DLIB, max_size=800)
+        backend = RemoteInferenceBackend(mc, client)
+
+        dets = _detect_scaled(backend, np.zeros((1080, 1920, 3), dtype=np.uint8), mc.max_size)
+        b = dets[0].bbox
+        assert (b.x1, b.y1, b.x2, b.y2) == (1500, 100, 1900, 500)
+        assert client.infer.call_args[0][0].shape[:2] == (1080, 1920)
