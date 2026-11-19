@@ -157,6 +157,9 @@ class ModelConfig(BaseModel):
     face_num_jitters: int = 1
     face_upsample_times: int = 1
 
+    # Downscale the image to this width before this model runs (v1 max_size)
+    max_size: int | None = None
+
     # ALPR-specific
     alpr_service: str | None = None
     alpr_key: str | None = None
@@ -429,7 +432,8 @@ def _seq_item_to_model_config(
         labels=seq.get(f"{prefix}_labels"),
         min_confidence=float(seq.get(f"{prefix}_min_confidence", seq.get("object_min_confidence", 0.3))),
         pattern=section_general.get("pattern", global_general.get("pattern", ".*")),
-        max_detection_size=str(v) if (v := seq.get("max_detection_size") or seq.get("max_size") or section_max_size) is not None else None,
+        max_detection_size=str(v) if (v := seq.get("max_detection_size") or section_max_size) is not None else None,
+        max_size=int(seq["max_size"]) if seq.get("max_size") else None,
         model_width=int(seq["model_width"]) if "model_width" in seq else None,
         model_height=int(seq["model_height"]) if "model_height" in seq else None,
         known_faces_dir=seq.get("known_images_path"),

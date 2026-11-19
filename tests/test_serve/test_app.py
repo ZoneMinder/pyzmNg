@@ -414,3 +414,44 @@ class TestNonFileBackedModels:
         assert [(m["name"], m["type"], m["framework"]) for m in models] == [
             ("DLIB face recognition", "face", "face_dlib")
         ]
+
+
+class TestServerMaxSize:
+    """#99: a gateway model loaded with max_size runs on a downscaled frame."""
+
+    def test_infer_downscales_and_rescales(self):
+        import cv2
+        import numpy as np
+        from pyzm.models.config import ModelConfig
+
+        seen = {}
+
+        class _Backend:
+            name = "dlib"
+
+            def __init__(self):
+                self._config = ModelConfig(name="dlib", max_size=100)
+
+            def detect(self, image):
+                seen["shape"] = image.shape
+                return [Detection("erik", 1.0, BBox(10, 10, 20, 20), "dlib", "face")]
+
+        mc = MagicMock()
+        mc.type.value = "face"
+        mc.name = "dlib"
+        det = MagicMock()
+        det._pipeline._backends = [(mc, _Backend())]
+        ok, buf = cv2.imencode(".jpg", np.zeros((150, 200, 3), dtype=np.uint8))
+        with patch("pyzm.serve.app.Detector") as MockDetector:
+            MockDetector.return_value = det
+            from pyzm.serve.app import create_app
+            from fastapi.testclient import TestClient
+            with TestClient(create_app(ServerConfig(models=["dlib"]))) as tc:
+                resp = tc.post(
+                    "/infer",
+                    files={"image": ("f.jpg", buf.tobytes(), "image/jpeg")},
+                    data={"type": "face", "name": "dlib"},
+                )
+        assert resp.status_code == 200
+        assert seen["shape"][:2] == (75, 100)
+        assert resp.json()["detections"][0]["box"] == [20, 20, 40, 40]

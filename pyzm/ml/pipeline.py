@@ -7,6 +7,7 @@ checks, and runs zone/size/pattern filters.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING
@@ -47,6 +48,26 @@ _WEIGHTS_REQUIRED_FRAMEWORKS = frozenset({
     ModelFramework.CORAL,
     ModelFramework.FACE_TPU,
 })
+
+
+def _detect_scaled(backend: MLBackend, image: "np.ndarray", max_size: int | None) -> list[Detection]:
+    """Run *backend* on *image* downscaled to *max_size* wide, boxes in original coordinates."""
+    h, w = image.shape[:2]
+    if not max_size or w <= max_size:
+        return backend.detect(image)
+    import cv2
+
+    new_h = round(h * max_size / w)
+    logger.debug("%s: max_size %d, resizing %dx%d to %dx%d", backend.name, max_size, w, h, max_size, new_h)
+    raw = backend.detect(cv2.resize(image, (max_size, new_h), interpolation=cv2.INTER_AREA))
+    fx, fy = w / max_size, h / new_h
+    return [
+        dataclasses.replace(d, bbox=BBox(
+            x1=round(d.bbox.x1 * fx), y1=round(d.bbox.y1 * fy),
+            x2=round(d.bbox.x2 * fx), y2=round(d.bbox.y2 * fy),
+        ))
+        for d in raw
+    ]
 
 
 def _create_backend(model_config: ModelConfig) -> MLBackend:
@@ -349,7 +370,7 @@ class ModelPipeline:
                         self._monitor_lat, self._monitor_lon,
                     )
                 else:
-                    raw = backend.detect(image)
+                    raw = _detect_scaled(backend, image, mc.max_size)
                 if raw:
                     det_summary = ", ".join(
                         f"{d.label}:{d.confidence:.0%}" for d in raw

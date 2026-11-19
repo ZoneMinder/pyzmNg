@@ -266,7 +266,8 @@ def create_app(config: ServerConfig | None = None) -> FastAPI:
             )
 
         try:
-            detections = backend.detect(frame)
+            from pyzm.ml.pipeline import _detect_scaled
+            detections = _detect_scaled(backend, frame, backend._config.max_size)
         except Exception as exc:  # inference failure -> report, don't 500
             logger.exception("Inference failed for type=%s name=%s", type, name)
             return {"detections": [], "error": str(exc)}
