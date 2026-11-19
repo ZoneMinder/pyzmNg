@@ -389,3 +389,103 @@ class TestPipelineFactory:
         )
         backend = _create_backend(config)
         assert isinstance(backend, FaceTpuBackend)
+
+
+# ===================================================================
+# Lock name and size follow the real processor (#100)
+# ===================================================================
+
+
+class TestLockFollowsProcessor:
+
+    def _stub(self, processor, **cfg):
+        from pyzm.ml.backends.base import PortalockerMixin
+
+        class Stub(PortalockerMixin):
+            name = "stub"
+
+        obj = Stub()
+        obj.processor = processor
+        obj._config = ModelConfig(processor=Processor.CPU, **cfg)
+        return obj
+
+    @patch("pyzm.ml.backends.base.portalocker")
+    def test_name_uses_backend_processor(self, mock_portalocker):
+        obj = self._stub("tpu")
+        obj._init_lock()
+        assert obj._lock_name.endswith("_tpu_lock")
+
+    @patch("pyzm.ml.backends.base.portalocker")
+    def test_legacy_processor_keys_size_the_lock(self, mock_portalocker):
+        from pyzm.models.config import DetectorConfig
+        cfg = DetectorConfig.from_dict({
+            "general": {"model_sequence": "object"},
+            "object": {"general": {}, "sequence": [{
+                "object_processor": "gpu",
+                "gpu_max_processes": 3, "gpu_max_lock_wait": 100,
+                "cpu_max_processes": 5,
+            }]},
+        })
+        obj = self._stub("gpu")
+        obj._config = cfg.models[0]
+        obj._init_lock()
+        mock_portalocker.BoundedSemaphore.assert_called_once_with(
+            maximum=3, name=obj._lock_name, timeout=100,
+        )
+
+    @patch("pyzm.ml.backends.base.portalocker")
+    def test_explicit_keys_beat_legacy_keys(self, mock_portalocker):
+        from pyzm.models.config import DetectorConfig
+        cfg = DetectorConfig.from_dict({
+            "general": {"model_sequence": "object", "max_lock_wait": 30},
+            "object": {"general": {}, "sequence": [{
+                "max_processes": 2, "cpu_max_processes": 5, "cpu_max_lock_wait": 100,
+            }]},
+        })
+        obj = self._stub("cpu")
+        obj._config = cfg.models[0]
+        obj._init_lock()
+        mock_portalocker.BoundedSemaphore.assert_called_once_with(
+            maximum=2, name=obj._lock_name, timeout=30,
+        )
+
+    def test_coral_takes_tpu_lock(self):
+        from pyzm.ml.backends.coral import CoralBackend
+        b = CoralBackend(ModelConfig(framework=ModelFramework.CORAL))
+        assert b._lock_name.endswith("_tpu_lock")
+
+    def test_dlib_on_cuda_switches_to_gpu_lock(self, tmp_path):
+        import pickle
+        import sys
+        from pyzm.ml.backends.face_dlib import FaceDlibBackend
+
+        (tmp_path / "faces.dat").write_bytes(pickle.dumps({"knn": 1}))
+        dlib = MagicMock(DLIB_USE_CUDA=True)
+        dlib.cuda.get_num_devices.return_value = 1
+        with patch.dict(sys.modules, {"dlib": dlib, "face_recognition": MagicMock()}):
+            b = FaceDlibBackend(ModelConfig(
+                type="face", framework=ModelFramework.FACE_DLIB, known_faces_dir=str(tmp_path),
+            ))
+            assert b._lock_name.endswith("_cpu_lock")
+            b.load()
+        assert b._lock_name.endswith("_gpu_lock")
+
+    @patch("pyzm.ml.backends.base.portalocker")
+    def test_legacy_keys_survive_multi_worker_round_trip(self, mock_portalocker):
+        """--workers > 1 rebuilds the config from JSON; v1 lock keys must still apply."""
+        from pyzm.models.config import DetectorConfig, ServerConfig
+        from pyzm.serve.app import config_from_env, config_to_env
+
+        dc = DetectorConfig.from_dict({
+            "general": {"model_sequence": "object"},
+            "object": {"general": {}, "sequence": [{"gpu_max_processes": 3, "gpu_max_lock_wait": 100}]},
+        })
+        raw = config_to_env(ServerConfig(detector_config=dc, workers=2))
+        with patch.dict("os.environ", {"PYZM_SERVER_CONFIG": raw}):
+            restored = config_from_env()
+        obj = self._stub("gpu")
+        obj._config = restored.detector_config.models[0]
+        obj._init_lock()
+        mock_portalocker.BoundedSemaphore.assert_called_once_with(
+            maximum=3, name=obj._lock_name, timeout=100,
+        )

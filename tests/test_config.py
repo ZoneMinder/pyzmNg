@@ -293,8 +293,21 @@ class TestLockConfig:
             "object": {"general": {}, "sequence": [{}]},
         }
         cfg = DetectorConfig.from_dict(ml)
-        assert cfg.models[0].max_lock_wait == 120
-        assert cfg.models[0].max_processes == 1
+        # Unset in config; the lock resolves them (v1 keys, then 120 and 1)
+        assert cfg.models[0].max_lock_wait is None
+        assert cfg.models[0].max_processes is None
+
+        from unittest.mock import patch
+        from pyzm.ml.backends.base import PortalockerMixin
+
+        class Stub(PortalockerMixin):
+            name = "stub"
+
+        stub = Stub()
+        stub._config = cfg.models[0]
+        with patch("pyzm.ml.backends.base.portalocker") as pl:
+            stub._init_lock()
+        pl.BoundedSemaphore.assert_called_once_with(maximum=1, name=stub._lock_name, timeout=120)
 
 
 # ---------------------------------------------------------------------------

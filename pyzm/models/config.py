@@ -190,8 +190,10 @@ class ModelConfig(BaseModel):
 
     # Lock management
     disable_locks: bool = False
-    max_lock_wait: int = 120
-    max_processes: int = 1
+    # None: the backend falls back to v1's <processor>_max_lock_wait /
+    # <processor>_max_processes in options, then 120 and 1.
+    max_lock_wait: int | None = None
+    max_processes: int | None = None
 
     # Pre-condition: only run if a previous model already matched one of these labels
     pre_existing_labels: list[str] = Field(default_factory=list)
@@ -473,8 +475,10 @@ def _seq_item_to_model_config(
         allow_cpu_fallback=_bool(seq.get("allow_cpu_fallback", True), default=True),
         gpu_retry_seconds=int(seq.get("gpu_retry_seconds", 60)),
         disable_locks=_bool(seq.get("disable_locks") or global_general.get("disable_locks", "no")),
-        max_lock_wait=int(seq.get("max_lock_wait", global_general.get("max_lock_wait", 120))),
-        max_processes=int(seq.get("max_processes", global_general.get("max_processes", 1))),
+        **{
+            k: int(v) if (v := seq.get(k, global_general.get(k))) is not None else None
+            for k in ("max_lock_wait", "max_processes")
+        },
         pre_existing_labels=pre_existing if isinstance(pre_existing, list) else [],
         options=options,
     )

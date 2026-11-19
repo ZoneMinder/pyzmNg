@@ -210,3 +210,26 @@ class TestSetupGpuFallback:
 
         assert b.processor == "cpu"
         assert b._gpu.retry_at is None
+
+
+class TestLockFollowsFallback:
+    """#100: after a CPU fallback the next request takes the cpu lock, and the
+    gpu lock again once the GPU is restored."""
+
+    def test_lock_tracks_processor_across_fallback_and_restore(self):
+        from unittest.mock import patch
+
+        config = ModelConfig(name="yolo11m", processor=Processor.GPU, gpu_retry_seconds=60)
+        with patch("pyzm.ml.backends.base.portalocker"):
+            b = _ScriptedYolo(config, [cv2.error("CUDA busy"), DETECTION, DETECTION, DETECTION])
+            assert b._lock_name.endswith("_gpu_lock")
+
+            b.detect(IMAGE)  # GPU fails, this call answers on CPU
+            b.detect(IMAGE)
+            assert b.forward_processors[-1] == "cpu"
+            assert b._lock_name.endswith("_cpu_lock")
+
+            b._gpu.retry_at = time.monotonic() - 1  # backoff elapsed
+            b.detect(IMAGE)
+            assert b.forward_processors[-1] == "gpu"
+            assert b._lock_name.endswith("_gpu_lock")
