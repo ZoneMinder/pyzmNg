@@ -382,3 +382,13 @@ class TestMaxSize:
             _minimal_ml_options(seq_extras={"max_size": 800, "max_detection_size": "50%"})
         )
         assert cfg.models[0].max_detection_size == "50%"
+
+    def test_max_size_accepts_px_suffix(self):
+        cfg = DetectorConfig.from_dict(_minimal_ml_options(seq_extras={"max_size": "800px"}))
+        assert cfg.models[0].max_size == 800
+
+    def test_bad_max_size_is_ignored_with_warning(self, caplog):
+        with caplog.at_level("WARNING", logger="pyzm"):
+            cfg = DetectorConfig.from_dict(_minimal_ml_options(seq_extras={"max_size": "50%"}))
+        assert cfg.models[0].max_size is None
+        assert "max_size" in caplog.text and "50%" in caplog.text
