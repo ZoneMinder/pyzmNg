@@ -8,7 +8,7 @@ import logging
 
 import pytest
 
-from pyzm.models.config import ServerConfig
+from pyzm.models.config import ModelConfig, ServerConfig
 from pyzm.models.detection import BBox, Detection, DetectionResult
 
 
@@ -20,6 +20,7 @@ def _mock_detector():
     mc.type.value = "object"
     mc.name = "yolov4"
     backend = MagicMock()
+    backend._config = ModelConfig(name="yolov4")  # real backends carry a ModelConfig
     backend.detect.return_value = [
         Detection(label="person", confidence=0.95, bbox=BBox(10, 20, 50, 80), model_name="yolov4")
     ]
