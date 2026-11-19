@@ -3,12 +3,40 @@
 All notable changes to this project will be documented in this file.
 
 
+## [2.5.9] - 2026-11-19
+
+### Bug Fixes
+
+- move a YOLO model's lock with its CPU fallback and GPU restore ([7fd7a70](https://github.com/ZoneMinder/pyzmNg/commit/7fd7a70bc30c0903c08611cab85d3700d992e11a))
+- keep v1 lock keys working on multi-worker gateways ([1bfb33c](https://github.com/ZoneMinder/pyzmNg/commit/1bfb33c24a4789f164a463dc34f13a5a66c4d678))
+- name and size locks by the processor a backend really uses ([c4a5440](https://github.com/ZoneMinder/pyzmNg/commit/c4a5440b3f2fc543b29d4a5751b1eb1b927a66fc))
+- accept max_size: "800px" and ignore a bad max_size with a warning ([f98ee49](https://github.com/ZoneMinder/pyzmNg/commit/f98ee49a46f7195ef01092e1bb2041eb315aff46))
+- don't apply max_size client-side to gateway models ([f9176da](https://github.com/ZoneMinder/pyzmNg/commit/f9176daeff0663450aa871d4049cde9383db70c1))
+- treat max_size as a pre-inference downscale, not an area cap ([470a799](https://github.com/ZoneMinder/pyzmNg/commit/470a7993351f88294e2bf4175e04367d03b4cfa7))
+
+### Documentation
+
+- document max_size as a per-model downscale ([c72c804](https://github.com/ZoneMinder/pyzmNg/commit/c72c80491eedd8b8cdccdfea5c08e4398afc8b57))
+
+### Miscellaneous
+
+- bump version to v2.5.9 ([5af9341](https://github.com/ZoneMinder/pyzmNg/commit/5af934161f3077235db0d863cfb0bb996e4b22e2))
+
+### Testing
+
+- keep the ALPR resize test with the other ALPR tests ([f4b9e65](https://github.com/ZoneMinder/pyzmNg/commit/f4b9e65bbd4b25cdd010f72569ae49595cf5d0aa))
+- give the serve test mocks a real ModelConfig ([b89b7a3](https://github.com/ZoneMinder/pyzmNg/commit/b89b7a3b4a36448d3a8d69ea7290ee0dc03893a4))
+
 ## [2.5.8] - 2026-11-17
 
 ### Bug Fixes
 
 - load models lazily in detect_event so Coral loads under the lock ([fe0dff1](https://github.com/ZoneMinder/pyzmNg/commit/fe0dff101842a78252cc91e6ee254c324a59b979))
 - put PortalockerMixin first so backend locks aren't no-ops ([a93ccaf](https://github.com/ZoneMinder/pyzmNg/commit/a93ccaff0fe4b376420672b3472a835037722d15))
+
+### Documentation
+
+- update CHANGELOG for v2.5.8 ([5d1b614](https://github.com/ZoneMinder/pyzmNg/commit/5d1b6142022f9b001ed3db2bf8dc5daaac924218))
 
 ### Miscellaneous
 
